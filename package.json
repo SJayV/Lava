@@ -1,0 +1,16 @@
+{
+  "name": "lava",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Raymarched WebGPU lava-drop demo. No runtime dependencies, no bundler — served as plain ES modules.",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint ."
+  },
+  "devDependencies": {
+    "eslint": "^9.9.0",
+    "vitest": "^2.0.5"
+  }
+}
