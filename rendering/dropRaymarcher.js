@@ -1,6 +1,8 @@
 import { getDensityFieldShaderChunk } from './densityField.js';
+import { getTurbulenceNoiseShaderChunk } from './turbulenceNoise.js';
+import { getTemperatureColorRampShaderChunk } from './temperatureColorRamp.js';
 
-const UNIFORM_BUFFER_SIZE = 9 * 16;
+const UNIFORM_BUFFER_SIZE = 10 * 16;
 
 // ───── WGSL SHADER ─────
 
@@ -15,6 +17,7 @@ struct RaymarchUniforms {
   fieldParams: vec4<f32>,              // x=h, y=isoLevel, z=fluidDensity, w=dropCount
   stepParams: vec4<f32>,               // x=minStep, y=maxStep, z=surfaceEpsilon, w=maxTraceSteps
   backgroundColor: vec4<f32>,          // xyz=background rgb, w=gradientMagnitudeMax (|∇A_max|, PLAN.md §1.3)
+  noiseParams: vec4<f32>,               // x=noiseScale, y=noiseSpeed, z=noiseOctaves, w=animationTime
 }
 
 struct Drop {
@@ -26,6 +29,8 @@ struct Drop {
 @group(0) @binding(1) var<storage, read> drops: array<Drop>;
 
 ${getDensityFieldShaderChunk()}
+${getTurbulenceNoiseShaderChunk()}
+${getTemperatureColorRampShaderChunk()}
 
 fn computeDensityField(position: vec3<f32>, relevantMask: u32) -> f32 {
   var total = 0.0;
@@ -194,8 +199,14 @@ fn fragmentMain(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f3
     return vec4<f32>(uniforms.backgroundColor.xyz, 1.0);
   }
 
-  let normal = computeFieldGradientNormal(result.position, result.relevantMask);
-  return vec4<f32>(normal * 0.5 + vec3<f32>(0.5), 1.0);
+  let noiseScale = uniforms.noiseParams.x;
+  let noiseSpeed = uniforms.noiseParams.y;
+  let noiseOctaves = u32(uniforms.noiseParams.z);
+  let animationTime = uniforms.noiseParams.w;
+  let heatValue = computeTurbulence(result.position, animationTime, noiseOctaves, noiseScale, noiseSpeed);
+
+  let lavaColor = computeTemperatureColor(heatValue);
+  return vec4<f32>(lavaColor, 1.0);
 }
 `;
 
@@ -238,6 +249,7 @@ export function writeRaymarchUniforms(raymarcher, view) {
   data.set([view.h, view.isoLevel, view.fluidDensity, view.dropCount], 24);
   data.set([view.minStep, view.maxStep, view.surfaceEpsilon, view.maxTraceSteps], 28);
   data.set([...view.backgroundColor, view.gradientMagnitudeMax], 32);
+  data.set([view.noiseScale, view.noiseSpeed, view.noiseOctaves, view.animationTime], 36);
   raymarcher.device.queue.writeBuffer(raymarcher.uniformBuffer, 0, data);
 }
 
