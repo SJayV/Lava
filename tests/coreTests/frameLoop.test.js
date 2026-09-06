@@ -45,7 +45,7 @@ describe('advanceFrameLoop', () => {
   it('always passes the unscaled fixedTimestep to updateSimulation, never a time-scaled dt', () => {
     const { loopState, options, updateSimulation } = makeHarness({ fixedTimestep: 1 / 120, timeScale: 0.18 });
 
-    // enough real elapsed time that, once scaled down, still covers one substep
+    // scaled down, still covers one substep
     advanceFrameLoop(loopState, (1 / 120) / 0.18, options);
 
     expect(updateSimulation).toHaveBeenCalledWith(1 / 120);
@@ -54,7 +54,7 @@ describe('advanceFrameLoop', () => {
   it('scales accumulation by getTimeScale before draining substeps', () => {
     const { loopState, options, updateSimulation } = makeHarness({ fixedTimestep: 1 / 120, timeScale: 0.5 });
 
-    // real elapsed time for one substep, but scaled by 0.5 it is not enough yet
+    // scaled by 0.5, not enough yet
     advanceFrameLoop(loopState, 1 / 120, options);
 
     expect(updateSimulation).not.toHaveBeenCalled();

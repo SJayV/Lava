@@ -3,11 +3,16 @@ import { registerBuffer, getBuffer } from '../core/resourceRegistry.js';
 const FLOATS_PER_DROP = 8;
 const BYTES_PER_DROP = FLOATS_PER_DROP * 4;
 
-export function computeLineSeedPositions({ ballCount, lineSpanWidth }) {
+export function computeSmoothingRadiusFromLineSpan({ ballCount, lineSpanWidth, spacingToHRatio = 0.6 }) {
+  const spacing = lineSpanWidth / (ballCount - 1);
+  return spacing / spacingToHRatio;
+}
+
+export function computeLineSeedPositions({ ballCount, lineSpanWidth, lineY = 0 }) {
   const positions = [];
   for (let i = 0; i < ballCount; i += 1) {
     const x = -lineSpanWidth / 2 + (i / (ballCount - 1)) * lineSpanWidth;
-    positions.push([x, 0, 0]);
+    positions.push([x, lineY, 0]);
   }
   return positions;
 }

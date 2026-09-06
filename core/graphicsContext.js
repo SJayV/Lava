@@ -6,6 +6,9 @@ export async function initializeGraphicsContext(canvas) {
   }
 
   const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    throw new Error('graphicsContext: no WebGPU adapter available (GPU/driver not supported, or WebGPU disabled in this browser)');
+  }
   const device = await adapter.requestDevice();
   const canvasContext = canvas.getContext('webgpu');
   const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
