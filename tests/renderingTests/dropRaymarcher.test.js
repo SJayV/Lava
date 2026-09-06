@@ -82,6 +82,22 @@ describe('traceDensityIsosurface relevant-body masking', () => {
   });
 });
 
+describe('fragmentMain color noise (heatValue)', () => {
+  const fragmentBody = _extractFunctionBody(SHADER_SOURCE, 'fragmentMain');
+
+  it('samples the shared turbulence field at the hit point for heatValue', () => {
+    expect(fragmentBody).toMatch(/let heatValue = computeTurbulence\(result\.position/);
+  });
+
+  it('reads noise params from the uniform buffer, not hardcoded constants', () => {
+    expect(fragmentBody).toContain('uniforms.noiseParams');
+  });
+
+  it('delegates the heatValue-to-color ramp to the shared temperature ramp module', () => {
+    expect(fragmentBody).toMatch(/computeTemperatureColor\(heatValue\)/);
+  });
+});
+
 describe('computeFieldGradientNormal', () => {
   it('still uses a live central-difference gradient (only once per hit, not per step)', () => {
     const normalBody = _extractFunctionBody(SHADER_SOURCE, 'computeFieldGradientNormal');

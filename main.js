@@ -59,6 +59,10 @@ const RESPAWN_Y = LINE_Y - 6;
 const MU = 9;
 const GAMMA = 0.2;
 
+const NOISE_SCALE = 9;
+const NOISE_SPEED = 0.5;
+const NOISE_OCTAVES = 4;
+
 async function main() {
   const canvas = document.getElementById('canvas');
   const graphicsContext = await initializeGraphicsContext(canvas);
@@ -162,6 +166,10 @@ async function main() {
       maxTraceSteps: 32,
       backgroundColor: [0.02, 0.02, 0.03],
       gradientMagnitudeMax,
+      noiseScale: NOISE_SCALE,
+      noiseSpeed: NOISE_SPEED,
+      noiseOctaves: NOISE_OCTAVES,
+      animationTime: performance.now() / 1000,
     });
 
     frameCommandEncoder ??= graphicsContext.device.createCommandEncoder();
