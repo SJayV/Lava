@@ -1,8 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { SHADER_SOURCE } from '../../rendering/dropRaymarcher.js';
 
-// step-size divisor: analytic bound (§1.3), not live per-step gradient
-// sampling — caused a GPU TDR reset. Asserted on the shader source itself.
 
 function _extractFunctionBody(source, functionName) {
   const start = source.indexOf(`fn ${functionName}(`);
@@ -39,6 +37,48 @@ describe('traceDensityIsosurface step size', () => {
     const perStepCalls = traceBody.match(/computeDensityField\(/g) ?? [];
     // 1 initial + 1 per step + 1 bisection, never the 4x blowup
     expect(perStepCalls.length).toBeLessThanOrEqual(3);
+  });
+});
+
+describe('traceDensityIsosurface sphere-bound acceleration', () => {
+  const traceBody = _extractFunctionBody(SHADER_SOURCE, 'traceDensityIsosurface');
+
+  it('tests every body analytically before marching', () => {
+    expect(traceBody).toContain('computeRaySphereEntryExit');
+  });
+
+  it('exits immediately when no body sphere is hit', () => {
+    expect(traceBody).toMatch(/anyBodyHit[\s\S]*return result/);
+  });
+
+  it('marches from the sphere-bound union, not the full trace-box range', () => {
+    expect(traceBody).toContain('var t = clusterNear');
+    expect(traceBody).toContain('t >= clusterFar');
+  });
+});
+
+// only bodies whose ray-sphere test actually hit can contribute nonzero
+// density along this ray (W_density has zero support beyond r=h) — mask
+// them once and skip the rest on every subsequent step, not just the range
+describe('traceDensityIsosurface relevant-body masking', () => {
+  const traceBody = _extractFunctionBody(SHADER_SOURCE, 'traceDensityIsosurface');
+  const densityBody = _extractFunctionBody(SHADER_SOURCE, 'computeDensityField');
+
+  it('builds a relevantMask bit per hit body during the sphere-bound pass', () => {
+    expect(traceBody).toMatch(/relevantMask = relevantMask \| \(1u << k\)/);
+  });
+
+  it('passes the mask into computeDensityField instead of scanning all bodies unconditionally', () => {
+    expect(SHADER_SOURCE).toContain('fn computeDensityField(position: vec3<f32>, relevantMask: u32)');
+    expect(densityBody).toMatch(/\(relevantMask & \(1u << i\)\) == 0u/);
+  });
+
+  it('marches using the masked density field, not the unmasked one', () => {
+    const marchCalls = traceBody.match(/computeDensityField\([^)]*\)/g) ?? [];
+    expect(marchCalls.length).toBeGreaterThan(0);
+    for (const call of marchCalls) {
+      expect(call).toContain('relevantMask');
+    }
   });
 });
 
