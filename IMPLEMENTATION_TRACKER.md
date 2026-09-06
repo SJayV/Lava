@@ -25,11 +25,18 @@ to make failing code pass.
       - manual check: open `index.html` via a static server, confirm a line of
         blobby shapes renders (colors are normal-visualization debug output,
         not final shading)
-- [ ] **Step 2 — deterministic movement, check physics and tuning**
+- [x] **Step 2 — deterministic movement, check physics and tuning**
       Anchor/drip pairs (`simulation/dripState.js` or similar), the two-kernel
       force law (`W_density`, `W_cohesion`), phases (`ATTACHED`/`GROWING`/`FALLING`),
       respawn. Deterministic (no per-pair random timers yet) so behavior is
       reproducible while γ/h/μ/isoLevel get tuned. PLAN.md §2.
+      - follow-up, deferred: the drip currently moves as a rigid sphere: same
+        radius whether `GROWING` or `FALLING`. Add an actual elongation
+        regime — the body should visually stretch into an elongated
+        drop/teardrop shape while attached and pulling away, not just
+        translate. Likely needs a shape parameter (e.g. anisotropic stretch
+        along the anchor-drip axis, scaled by separation/h) fed into the
+        density field, not just a bigger/smaller sphere radius.
 - [ ] **Step 3 — 3D turbulence noise, for color sampling**
       `rendering/turbulenceNoise.js` (hash + fbm), wired only into shading
       color (`heatValue`) — not yet into surface perturbation. PLAN.md §1.4.
@@ -47,7 +54,7 @@ to make failing code pass.
 ## Infrastructure
 
 - [x] Repo scaffolded, `origin` remote wired to `https://github.com/SJayV/Lava`
-- [ ] Initial commit pushed
+- [x] Initial commit pushed
 - [ ] CI pipeline (GitHub Actions): run tests + lint on push/PR
 - [ ] GitHub Pages deploy — **on hold until Step 3 is done**, per explicit
       instruction; do not wire this up earlier even if CI is otherwise ready

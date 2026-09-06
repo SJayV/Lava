@@ -13,6 +13,10 @@ export function computeParticleMass(radius, fluidDensity) {
   return (4 / 3) * Math.PI * radius ** 3 * fluidDensity;
 }
 
+export function computeRadiusFromMass(mass, fluidDensity) {
+  return Math.cbrt(mass / ((4 / 3) * Math.PI * fluidDensity));
+}
+
 export function computeDensityField(point, drops, smoothingRadius) {
   let total = 0;
   for (const drop of drops) {
@@ -56,6 +60,10 @@ export function getDensityFieldShaderChunk() {
 
     fn computeParticleMass(radius: f32, fluidDensity: f32) -> f32 {
       return (4.0 / 3.0) * ${Math.PI} * radius * radius * radius * fluidDensity;
+    }
+
+    fn computeRadiusFromMass(mass: f32, fluidDensity: f32) -> f32 {
+      return pow(mass / ((4.0 / 3.0) * ${Math.PI} * fluidDensity), 1.0 / 3.0);
     }
   `;
 }

@@ -27,12 +27,15 @@ struct Drop {
 
 ${getDensityFieldShaderChunk()}
 
-fn computeDensityField(position: vec3<f32>) -> f32 {
+fn computeDensityField(position: vec3<f32>, relevantMask: u32) -> f32 {
   var total = 0.0;
   let dropCount = u32(uniforms.fieldParams.w);
   let h = uniforms.fieldParams.x;
   let fluidDensity = uniforms.fieldParams.z;
   for (var i = 0u; i < dropCount; i = i + 1u) {
+    if ((relevantMask & (1u << i)) == 0u) {
+      continue;
+    }
     let drop = drops[i];
     let offset = position - drop.positionAndRadius.xyz;
     let distance = length(offset);
@@ -42,15 +45,15 @@ fn computeDensityField(position: vec3<f32>) -> f32 {
   return total;
 }
 
-fn computeFieldGradientNormal(position: vec3<f32>) -> vec3<f32> {
+fn computeFieldGradientNormal(position: vec3<f32>, relevantMask: u32) -> vec3<f32> {
   let epsilon = 0.002;
   let dx = vec3<f32>(epsilon, 0.0, 0.0);
   let dy = vec3<f32>(0.0, epsilon, 0.0);
   let dz = vec3<f32>(0.0, 0.0, epsilon);
   let gradient = vec3<f32>(
-    computeDensityField(position + dx) - computeDensityField(position - dx),
-    computeDensityField(position + dy) - computeDensityField(position - dy),
-    computeDensityField(position + dz) - computeDensityField(position - dz),
+    computeDensityField(position + dx, relevantMask) - computeDensityField(position - dx, relevantMask),
+    computeDensityField(position + dy, relevantMask) - computeDensityField(position - dy, relevantMask),
+    computeDensityField(position + dz, relevantMask) - computeDensityField(position - dz, relevantMask),
   );
   return normalize(gradient);
 }
@@ -65,9 +68,22 @@ fn computeTraceBoundsIntersection(rayOrigin: vec3<f32>, rayDirection: vec3<f32>)
   return vec2<f32>(max(tNear, 0.0), min(tFar, uniforms.traceBoundsAndMaxDist.w));
 }
 
+fn computeRaySphereEntryExit(rayOrigin: vec3<f32>, rayDirection: vec3<f32>, sphereCenter: vec3<f32>, sphereRadius: f32) -> vec2<f32> {
+  let offset = rayOrigin - sphereCenter;
+  let b = dot(offset, rayDirection);
+  let c = dot(offset, offset) - sphereRadius * sphereRadius;
+  let discriminant = b * b - c;
+  if (discriminant < 0.0) {
+    return vec2<f32>(1.0, -1.0);
+  }
+  let sqrtDiscriminant = sqrt(discriminant);
+  return vec2<f32>(-b - sqrtDiscriminant, -b + sqrtDiscriminant);
+}
+
 struct TraceResult {
   hit: bool,
   position: vec3<f32>,
+  relevantMask: u32,
 }
 
 fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> TraceResult {
@@ -78,18 +94,42 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
     return result;
   }
 
+  let h = uniforms.fieldParams.x;
+  let dropCount = u32(uniforms.fieldParams.w);
+
+  // W_density has exactly zero support beyond r = h, so any body's
+  // contribution is provably zero outside a radius-h sphere around it —
+  // skip marching entirely outside the union of these analytic bounds.
+  var clusterNear = bounds.y;
+  var clusterFar = bounds.x;
+  var anyBodyHit = false;
+  var relevantMask = 0u;
+  for (var k = 0u; k < dropCount; k = k + 1u) {
+    let sphereInterval = computeRaySphereEntryExit(rayOrigin, rayDirection, drops[k].positionAndRadius.xyz, h);
+    if (sphereInterval.x <= sphereInterval.y) {
+      anyBodyHit = true;
+      relevantMask = relevantMask | (1u << k);
+      clusterNear = min(clusterNear, max(sphereInterval.x, bounds.x));
+      clusterFar = max(clusterFar, min(sphereInterval.y, bounds.y));
+    }
+  }
+  if (!anyBodyHit) {
+    return result;
+  }
+  result.relevantMask = relevantMask;
+
   let isoLevel = uniforms.fieldParams.y;
   let minStep = uniforms.stepParams.x;
   let maxStep = uniforms.stepParams.y;
   let maxTraceSteps = u32(uniforms.stepParams.w);
 
-  var t = bounds.x;
+  var t = clusterNear;
   var previousT = t;
-  var previousSign = sign(computeDensityField(rayOrigin + rayDirection * t) - isoLevel);
+  var previousSign = sign(computeDensityField(rayOrigin + rayDirection * t, relevantMask) - isoLevel);
 
   for (var i = 0u; i < maxTraceSteps; i = i + 1u) {
     let position = rayOrigin + rayDirection * t;
-    let density = computeDensityField(position);
+    let density = computeDensityField(position, relevantMask);
     let currentSign = sign(density - isoLevel);
 
     if (currentSign != previousSign) {
@@ -97,7 +137,7 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
       var hi = t;
       for (var b = 0u; b < 6u; b = b + 1u) {
         let mid = 0.5 * (lo + hi);
-        let midDensity = computeDensityField(rayOrigin + rayDirection * mid);
+        let midDensity = computeDensityField(rayOrigin + rayDirection * mid, relevantMask);
         if (sign(midDensity - isoLevel) == previousSign) {
           lo = mid;
         } else {
@@ -115,7 +155,7 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
     let step = clamp(abs(density - isoLevel) / uniforms.backgroundColor.w, minStep, maxStep);
     t = t + step;
 
-    if (t >= bounds.y) {
+    if (t >= clusterFar) {
       return result;
     }
   }
@@ -154,7 +194,7 @@ fn fragmentMain(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f3
     return vec4<f32>(uniforms.backgroundColor.xyz, 1.0);
   }
 
-  let normal = computeFieldGradientNormal(result.position);
+  let normal = computeFieldGradientNormal(result.position, result.relevantMask);
   return vec4<f32>(normal * 0.5 + vec3<f32>(0.5), 1.0);
 }
 `;
@@ -201,15 +241,17 @@ export function writeRaymarchUniforms(raymarcher, view) {
   raymarcher.device.queue.writeBuffer(raymarcher.uniformBuffer, 0, data);
 }
 
-export function renderRaymarchPass(raymarcher, commandEncoder, colorTextureView, dropBuffer) {
-  const bindGroup = raymarcher.device.createBindGroup({
+export function makeRaymarchBindGroup(raymarcher, dropBuffer) {
+  return raymarcher.device.createBindGroup({
     layout: raymarcher.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: raymarcher.uniformBuffer } },
       { binding: 1, resource: { buffer: dropBuffer } },
     ],
   });
+}
 
+export function renderRaymarchPass(raymarcher, commandEncoder, colorTextureView, bindGroup) {
   const pass = commandEncoder.beginRenderPass({
     colorAttachments: [{ view: colorTextureView, loadOp: 'clear', storeOp: 'store' }],
   });

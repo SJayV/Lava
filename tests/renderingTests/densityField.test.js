@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeDensityKernel,
   computeParticleMass,
+  computeRadiusFromMass,
   computeDensityField,
   computeIsoLevel,
   computeGradientMagnitudeBound,
@@ -39,11 +40,32 @@ describe('computeDensityKernel (poly6, W_density)', () => {
 describe('computeParticleMass', () => {
   it('matches the sphere-volume mass formula', () => {
     const radius = 0.1;
-    const fluidDensity = 1000;
+    const fluidDensity = 2000;
 
     const mass = computeParticleMass(radius, fluidDensity);
 
     expect(mass).toBeCloseTo((4 / 3) * Math.PI * radius ** 3 * fluidDensity);
+  });
+});
+
+describe('computeRadiusFromMass', () => {
+  it('is the inverse of computeParticleMass', () => {
+    const radius = 0.15;
+    const fluidDensity = 1000;
+
+    const mass = computeParticleMass(radius, fluidDensity);
+    const roundTrippedRadius = computeRadiusFromMass(mass, fluidDensity);
+
+    expect(roundTrippedRadius).toBeCloseTo(radius);
+  });
+
+  it('grows with mass', () => {
+    const fluidDensity = 1000;
+
+    const small = computeRadiusFromMass(100, fluidDensity);
+    const large = computeRadiusFromMass(800, fluidDensity);
+
+    expect(large).toBeGreaterThan(small);
   });
 });
 
@@ -109,6 +131,33 @@ describe('computeIsoLevel', () => {
       expect(densityAtRIso).toBeCloseTo(isoLevel);
     }
   });
+
+  // regression: calibrating isoLevel off a heavier body's mass can leave a
+  // much lighter body unable to ever cross isoLevel at all — it becomes
+  // invisible once separated from the heavier body's field, even though
+  // it's still physically present and moving
+  it('a much lighter body cannot reach isoLevel when calibrated off a heavier one', () => {
+    const h = 0.3;
+    const C = 0.7;
+    const heavyMass = computeParticleMass(0.3, 1000);
+    const lightMass = computeParticleMass(0.05, 1000);
+
+    const isoLevel = computeIsoLevel(heavyMass, h, C);
+    const lightBodyPeakDensity = lightMass * computeDensityKernel(0, h);
+
+    expect(lightBodyPeakDensity).toBeLessThan(isoLevel);
+  });
+
+  it('calibrating off the lighter body instead keeps it visible at its own target radius', () => {
+    const h = 0.3;
+    const C = 0.7;
+    const lightMass = computeParticleMass(0.05, 1000);
+
+    const isoLevel = computeIsoLevel(lightMass, h, C);
+    const lightBodyPeakDensity = lightMass * computeDensityKernel(0, h);
+
+    expect(lightBodyPeakDensity).toBeGreaterThanOrEqual(isoLevel);
+  });
 });
 
 describe('computeIsosurfaceRadiusRatio / computeIsoLevelCalibrationFactorForRadiusRatio', () => {
@@ -137,8 +186,6 @@ describe('computeIsosurfaceRadiusRatio / computeIsoLevelCalibrationFactorForRadi
   });
 });
 
-// step-size divisor: analytic bound, not live gradient sampling — caused a
-// GPU TDR reset (§1.3)
 describe('computeGradientMagnitudeBound', () => {
   it('matches N_local * mass * (2.7 / h^4)', () => {
     const mass = computeParticleMass(0.1, 1000);
