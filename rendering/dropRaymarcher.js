@@ -4,7 +4,7 @@ const UNIFORM_BUFFER_SIZE = 9 * 16;
 
 // ───── WGSL SHADER ─────
 
-const SHADER_SOURCE = /* wgsl */ `
+export const SHADER_SOURCE = /* wgsl */ `
 struct RaymarchUniforms {
   cameraRight: vec4<f32>,
   cameraUp: vec4<f32>,
@@ -14,7 +14,7 @@ struct RaymarchUniforms {
   traceBoundsAndMaxDist: vec4<f32>,    // xyz=trace half-extents, w=maxRayDistance
   fieldParams: vec4<f32>,              // x=h, y=isoLevel, z=fluidDensity, w=dropCount
   stepParams: vec4<f32>,               // x=minStep, y=maxStep, z=surfaceEpsilon, w=maxTraceSteps
-  backgroundColor: vec4<f32>,          // xyz=background rgb, w unused
+  backgroundColor: vec4<f32>,          // xyz=background rgb, w=gradientMagnitudeMax (|∇A_max|, PLAN.md §1.3)
 }
 
 struct Drop {
@@ -112,12 +112,7 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
     previousT = t;
     previousSign = currentSign;
 
-    let gradientMagnitude = max(length(vec3<f32>(
-      computeDensityField(position + vec3<f32>(0.01, 0.0, 0.0)) - density,
-      computeDensityField(position + vec3<f32>(0.0, 0.01, 0.0)) - density,
-      computeDensityField(position + vec3<f32>(0.0, 0.0, 0.01)) - density,
-    )) / 0.01, 1e-6);
-    let step = clamp(abs(density - isoLevel) / gradientMagnitude, minStep, maxStep);
+    let step = clamp(abs(density - isoLevel) / uniforms.backgroundColor.w, minStep, maxStep);
     t = t + step;
 
     if (t >= bounds.y) {
@@ -202,7 +197,7 @@ export function writeRaymarchUniforms(raymarcher, view) {
   data.set([...view.traceHalfExtents, view.maxRayDistance], 20);
   data.set([view.h, view.isoLevel, view.fluidDensity, view.dropCount], 24);
   data.set([view.minStep, view.maxStep, view.surfaceEpsilon, view.maxTraceSteps], 28);
-  data.set([...view.backgroundColor, 0], 32);
+  data.set([...view.backgroundColor, view.gradientMagnitudeMax], 32);
   raymarcher.device.queue.writeBuffer(raymarcher.uniformBuffer, 0, data);
 }
 

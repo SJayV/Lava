@@ -4,6 +4,9 @@ import {
   computeParticleMass,
   computeDensityField,
   computeIsoLevel,
+  computeGradientMagnitudeBound,
+  computeIsosurfaceRadiusRatio,
+  computeIsoLevelCalibrationFactorForRadiusRatio,
 } from '../../rendering/densityField.js';
 
 describe('computeDensityKernel (poly6, W_density)', () => {
@@ -89,5 +92,76 @@ describe('computeIsoLevel', () => {
     const isoLevel = computeIsoLevel(mass, h, C);
 
     expect(isoLevel).toBeCloseTo(C * mass * computeDensityKernel(0, h));
+  });
+
+  // mass cancels out — rendered radius depends only on h, C
+  it('crosses isoLevel at the same radius regardless of particle mass', () => {
+    const h = 0.3;
+    const C = 0.35;
+    const rIso = computeIsosurfaceRadiusRatio(C) * h;
+
+    const smallMass = computeParticleMass(0.05, 1000);
+    const largeMass = computeParticleMass(0.2, 1000);
+
+    for (const mass of [smallMass, largeMass]) {
+      const isoLevel = computeIsoLevel(mass, h, C);
+      const densityAtRIso = mass * computeDensityKernel(rIso, h);
+      expect(densityAtRIso).toBeCloseTo(isoLevel);
+    }
+  });
+});
+
+describe('computeIsosurfaceRadiusRatio / computeIsoLevelCalibrationFactorForRadiusRatio', () => {
+  it('are inverses of each other', () => {
+    const C = 0.6;
+
+    const radiusRatio = computeIsosurfaceRadiusRatio(C);
+    const roundTrippedC = computeIsoLevelCalibrationFactorForRadiusRatio(radiusRatio);
+
+    expect(roundTrippedC).toBeCloseTo(C);
+  });
+
+  it('reproduces the 2x-too-big regression: C = 0.35 renders a radius far larger than the ~0.3h drop radius', () => {
+    // C=0.35 -> r_iso ~0.543h, ~1.8x a 0.3h target
+    const radiusRatio = computeIsosurfaceRadiusRatio(0.35);
+
+    expect(radiusRatio).toBeCloseTo(0.5434, 3);
+    expect(radiusRatio / 0.3).toBeGreaterThan(1.5);
+  });
+
+  it('a higher calibration factor renders a smaller isosurface radius', () => {
+    const smallC = computeIsosurfaceRadiusRatio(0.35);
+    const largeC = computeIsosurfaceRadiusRatio(0.8);
+
+    expect(largeC).toBeLessThan(smallC);
+  });
+});
+
+// step-size divisor: analytic bound, not live gradient sampling — caused a
+// GPU TDR reset (§1.3)
+describe('computeGradientMagnitudeBound', () => {
+  it('matches N_local * mass * (2.7 / h^4)', () => {
+    const mass = computeParticleMass(0.1, 1000);
+    const h = 0.3;
+    const nLocal = 4;
+
+    const bound = computeGradientMagnitudeBound(mass, h, nLocal);
+
+    expect(bound).toBeCloseTo(nLocal * mass * (2.7 / h ** 4));
+  });
+
+  it('scales linearly with the local neighbor count', () => {
+    const mass = computeParticleMass(0.1, 1000);
+    const h = 0.3;
+
+    const boundAt2 = computeGradientMagnitudeBound(mass, h, 2);
+    const boundAt4 = computeGradientMagnitudeBound(mass, h, 4);
+
+    expect(boundAt4).toBeCloseTo(boundAt2 * 2);
+  });
+
+  it('is a single closed-form expression — no drop list or dropCount input', () => {
+    // no drops/dropCount — must stay O(1) per pixel
+    expect(computeGradientMagnitudeBound).toHaveLength(3);
   });
 });

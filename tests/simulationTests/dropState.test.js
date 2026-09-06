@@ -1,5 +1,43 @@
 import { describe, it, expect } from 'vitest';
-import { computeLineSeedPositions, makeDropRecord, packDropRecords } from '../../simulation/dropState.js';
+import {
+  computeLineSeedPositions,
+  computeSmoothingRadiusFromLineSpan,
+  makeDropRecord,
+  packDropRecords,
+} from '../../simulation/dropState.js';
+
+// regression: h derived from spacing (§2.5), not hardcoded — fixed h made
+// maxStep tiny, wasting the full step budget on missed rays
+describe('computeSmoothingRadiusFromLineSpan', () => {
+  it('matches spacing / 0.6 for the default ratio', () => {
+    const ballCount = 6;
+    const lineSpanWidth = 5.9;
+    const spacing = lineSpanWidth / (ballCount - 1);
+
+    const h = computeSmoothingRadiusFromLineSpan({ ballCount, lineSpanWidth });
+
+    expect(h).toBeCloseTo(spacing / 0.6);
+  });
+
+  it('grows when fewer balls share the same line span', () => {
+    const lineSpanWidth = 5.9;
+
+    const hFewBalls = computeSmoothingRadiusFromLineSpan({ ballCount: 6, lineSpanWidth });
+    const hManyBalls = computeSmoothingRadiusFromLineSpan({ ballCount: 25, lineSpanWidth });
+
+    expect(hFewBalls).toBeGreaterThan(hManyBalls);
+  });
+
+  it('respects a custom spacing-to-h ratio', () => {
+    const ballCount = 6;
+    const lineSpanWidth = 5.9;
+    const spacing = lineSpanWidth / (ballCount - 1);
+
+    const h = computeSmoothingRadiusFromLineSpan({ ballCount, lineSpanWidth, spacingToHRatio: 0.5 });
+
+    expect(h).toBeCloseTo(spacing / 0.5);
+  });
+});
 
 describe('computeLineSeedPositions', () => {
   it('places the requested number of positions', () => {
@@ -28,11 +66,20 @@ describe('computeLineSeedPositions', () => {
     }
   });
 
-  it('places every position on the y = 0, z = 0 line', () => {
+  it('places every position on the y = 0, z = 0 line by default', () => {
     const positions = computeLineSeedPositions({ ballCount: 3, lineSpanWidth: 2 });
 
     for (const [, y, z] of positions) {
       expect(y).toBe(0);
+      expect(z).toBe(0);
+    }
+  });
+
+  it('places every position at the given lineY, still on z = 0', () => {
+    const positions = computeLineSeedPositions({ ballCount: 3, lineSpanWidth: 2, lineY: 0.5 });
+
+    for (const [, y, z] of positions) {
+      expect(y).toBe(0.5);
       expect(z).toBe(0);
     }
   });
@@ -68,7 +115,7 @@ describe('packDropRecords', () => {
     const packed = packDropRecords(drops);
 
     expect(packed).toHaveLength(16);
-    // Float32Array rounds — compare within float32 precision, not exact equality.
+    // float32 rounding, not exact
     expect(packed[3]).toBeCloseTo(0.1);
     expect(packed[11]).toBeCloseTo(0.2);
   });

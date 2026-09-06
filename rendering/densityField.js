@@ -1,4 +1,5 @@
 const POLY6_NORMALIZATION = 315 / (64 * Math.PI);
+const POLY6_GRADIENT_MAX_COEFFICIENT = 2.7;
 
 export function computeDensityKernel(distance, smoothingRadius) {
   if (distance < 0 || distance >= smoothingRadius) {
@@ -26,6 +27,19 @@ export function computeDensityField(point, drops, smoothingRadius) {
 
 export function computeIsoLevel(mass, smoothingRadius, calibrationFactor) {
   return calibrationFactor * mass * computeDensityKernel(0, smoothingRadius);
+}
+
+export function computeIsosurfaceRadiusRatio(calibrationFactor) {
+  return Math.sqrt(1 - calibrationFactor ** (1 / 3));
+}
+
+export function computeIsoLevelCalibrationFactorForRadiusRatio(radiusRatio) {
+  return (1 - radiusRatio ** 2) ** 3;
+}
+
+export function computeGradientMagnitudeBound(mass, smoothingRadius, localNeighborCount) {
+  const gradientKernelMax = POLY6_GRADIENT_MAX_COEFFICIENT / smoothingRadius ** 4;
+  return localNeighborCount * mass * gradientKernelMax;
 }
 
 // ───── WGSL CHUNK ─────

@@ -9,7 +9,7 @@ describe('computeCameraBasisVectors', () => {
       [0, 1, 0],
     );
 
-    // frontal setup: eye and target share Y, so the view direction is pure -Z
+    // frontal: eye/target share Y, view dir pure -Z
     expect(forwardAxis).toEqual([0, 0, 1]);
     expect(rightAxis).toEqual([1, 0, 0]);
     expect(trueUpAxis).toEqual([0, 1, 0]);

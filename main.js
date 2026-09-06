@@ -3,9 +3,15 @@ import { makeResourceRegistry } from './core/resourceRegistry.js';
 import { makeFrameLoop } from './core/frameLoop.js';
 import { makeParameterStore, getParameterValue } from './parameters/parameterStore.js';
 import { computeCameraBasisVectors, computeLineSpanWidth } from './rendering/cameraProjection.js';
-import { computeParticleMass } from './rendering/densityField.js';
+import {
+  computeParticleMass,
+  computeIsoLevel,
+  computeGradientMagnitudeBound,
+  computeIsoLevelCalibrationFactorForRadiusRatio,
+} from './rendering/densityField.js';
 import {
   computeLineSeedPositions,
+  computeSmoothingRadiusFromLineSpan,
   makeDropRecord,
   packDropRecords,
   makeDropState,
@@ -13,7 +19,7 @@ import {
 } from './simulation/dropState.js';
 import { makeDropRaymarcher, writeRaymarchUniforms, renderRaymarchPass } from './rendering/dropRaymarcher.js';
 
-const BALL_COUNT = 25;
+const BALL_COUNT = 6;
 const FIXED_TIMESTEP = 1 / 120;
 const MAXIMUM_SUBSTEPS_PER_FRAME = 8;
 
@@ -21,13 +27,14 @@ const CAMERA_EYE = [0, -0.6, 4];
 const CAMERA_TARGET = [0, -0.6, 0];
 const CAMERA_UP = [0, 1, 0];
 const FOV_VERTICAL = Math.PI / 4;
-const MAX_RAY_DISTANCE = 20;
 
-const H = 0.3;
-const DROP_RADIUS = 0.3 * H;
 const FLUID_DENSITY = 1000;
-const ISO_LEVEL_C = 0.35;
-const TRACE_HALF_EXTENTS = [8, 4, 4];
+const N_LOCAL = 4;
+const TRACE_BOUND_MARGIN_IN_H = 2;
+const RADIUS_TO_H_RATIO = 0.22;
+const ISO_LEVEL_C = computeIsoLevelCalibrationFactorForRadiusRatio(RADIUS_TO_H_RATIO);
+
+const LINE_Y = 1.2;
 
 async function main() {
   const canvas = document.getElementById('canvas');
@@ -41,7 +48,16 @@ async function main() {
   const { rightAxis, trueUpAxis, forwardAxis } = computeCameraBasisVectors(CAMERA_EYE, CAMERA_TARGET, CAMERA_UP);
   const focalLength = 1 / Math.tan(FOV_VERTICAL / 2);
 
-  const seedPositions = computeLineSeedPositions({ ballCount: BALL_COUNT, lineSpanWidth });
+  const H = computeSmoothingRadiusFromLineSpan({ ballCount: BALL_COUNT, lineSpanWidth });
+  const DROP_RADIUS = RADIUS_TO_H_RATIO * H;
+  const MAX_RAY_DISTANCE = lineSpanWidth + TRACE_BOUND_MARGIN_IN_H * H;
+  const TRACE_HALF_EXTENTS = [
+    lineSpanWidth / 2 + TRACE_BOUND_MARGIN_IN_H * H,
+    TRACE_BOUND_MARGIN_IN_H * H,
+    TRACE_BOUND_MARGIN_IN_H * H,
+  ];
+
+  const seedPositions = computeLineSeedPositions({ ballCount: BALL_COUNT, lineSpanWidth, lineY: LINE_Y });
   const drops = seedPositions.map((position) => makeDropRecord({ position, radius: DROP_RADIUS }));
   const packedDrops = packDropRecords(drops);
 
@@ -51,7 +67,8 @@ async function main() {
   const raymarcher = makeDropRaymarcher(graphicsContext.device, graphicsContext.presentationFormat);
 
   const mass = computeParticleMass(DROP_RADIUS, FLUID_DENSITY);
-  const isoLevel = ISO_LEVEL_C * mass * (315 / (64 * Math.PI * H ** 3));
+  const isoLevel = computeIsoLevel(mass, H, ISO_LEVEL_C);
+  const gradientMagnitudeMax = computeGradientMagnitudeBound(mass, H, N_LOCAL);
 
   function renderFrame() {
     writeRaymarchUniforms(raymarcher, {
@@ -74,6 +91,7 @@ async function main() {
       surfaceEpsilon: 0.0015,
       maxTraceSteps: 64,
       backgroundColor: [0.02, 0.02, 0.03],
+      gradientMagnitudeMax,
     });
 
     const commandEncoder = graphicsContext.device.createCommandEncoder();

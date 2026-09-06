@@ -7,7 +7,7 @@ import {
   getTextureIfRegistered,
 } from '../../core/resourceRegistry.js';
 
-// A GPUDevice stand-in: only the two factory calls the registry touches.
+// GPUDevice stand-in: just the two factory calls
 function makeFakeDevice() {
   return {
     createBuffer: (descriptor) => ({ kind: 'buffer', descriptor }),
