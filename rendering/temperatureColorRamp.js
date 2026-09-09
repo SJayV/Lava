@@ -1,6 +1,6 @@
-export const YELLOW = [1.0, 0.8, 0.3];
-export const ORANGE = [1.0, 0.55, 0.15];
-export const RED = [0.9, 0.25, 0.1];
+export const YELLOW = [0.85, 0.45, 0.15];
+export const ORANGE = [0.8, 0.35, 0.07];
+export const RED = [0.7, 0.15, 0.05];
 
 const _lerp = (a, b, t) => a + (b - a) * t;
 const _smoothstep = (edge0, edge1, x) => {
@@ -17,7 +17,7 @@ export function computeTemperatureColor(heatValue) {
 // ───── WGSL CHUNK ─────
 
 export function getTemperatureColorRampShaderChunk() {
-  return /* wgsl */ `
+  return `
     fn computeTemperatureColor(heatValue: f32) -> vec3<f32> {
       let yellow = vec3<f32>(${YELLOW.join(', ')});
       let orange = vec3<f32>(${ORANGE.join(', ')});

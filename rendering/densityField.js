@@ -41,6 +41,12 @@ export function computeIsoLevelCalibrationFactorForRadiusRatio(radiusRatio) {
   return (1 - radiusRatio ** 2) ** 3;
 }
 
+export function computeIsoConsistentRadius({ isoLevel, radiusRatio, smoothingRadius, fluidDensity }) {
+  const calibrationFactor = computeIsoLevelCalibrationFactorForRadiusRatio(radiusRatio);
+  const requiredMass = isoLevel / (calibrationFactor * computeDensityKernel(0, smoothingRadius));
+  return computeRadiusFromMass(requiredMass, fluidDensity);
+}
+
 export function computeGradientMagnitudeBound(mass, smoothingRadius, localNeighborCount) {
   const gradientKernelMax = POLY6_GRADIENT_MAX_COEFFICIENT / smoothingRadius ** 4;
   return localNeighborCount * mass * gradientKernelMax;
