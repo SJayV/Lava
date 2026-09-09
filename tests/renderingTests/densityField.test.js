@@ -8,6 +8,7 @@ import {
   computeGradientMagnitudeBound,
   computeIsosurfaceRadiusRatio,
   computeIsoLevelCalibrationFactorForRadiusRatio,
+  computeIsoConsistentRadius,
 } from '../../rendering/densityField.js';
 
 describe('computeDensityKernel (poly6, W_density)', () => {
@@ -183,6 +184,44 @@ describe('computeIsosurfaceRadiusRatio / computeIsoLevelCalibrationFactorForRadi
     const largeC = computeIsosurfaceRadiusRatio(0.8);
 
     expect(largeC).toBeLessThan(smallC);
+  });
+});
+
+describe('computeIsoConsistentRadius', () => {
+  const h = 0.3;
+  const fluidDensity = 1000;
+
+  it('a body seeded with the returned radius crosses the given isoLevel exactly at the target ratio', () => {
+    const dripRatio = 0.3;
+    const dripMass = computeParticleMass(dripRatio * h, fluidDensity);
+    const isoLevel = computeIsoLevel(dripMass, h, computeIsoLevelCalibrationFactorForRadiusRatio(dripRatio));
+
+    const anchorRatio = 0.6;
+    const anchorRadius = computeIsoConsistentRadius({ isoLevel, radiusRatio: anchorRatio, smoothingRadius: h, fluidDensity });
+    const anchorMass = computeParticleMass(anchorRadius, fluidDensity);
+    const rIso = anchorRatio * h;
+
+    expect(anchorMass * computeDensityKernel(rIso, h)).toBeCloseTo(isoLevel);
+  });
+
+  it('a larger target ratio requires more mass (and thus a larger stored radius) under the same isoLevel', () => {
+    const dripMass = computeParticleMass(0.3 * h, fluidDensity);
+    const isoLevel = computeIsoLevel(dripMass, h, computeIsoLevelCalibrationFactorForRadiusRatio(0.3));
+
+    const smallRatioRadius = computeIsoConsistentRadius({ isoLevel, radiusRatio: 0.3, smoothingRadius: h, fluidDensity });
+    const largeRatioRadius = computeIsoConsistentRadius({ isoLevel, radiusRatio: 0.6, smoothingRadius: h, fluidDensity });
+
+    expect(largeRatioRadius).toBeGreaterThan(smallRatioRadius);
+  });
+
+  it('reproduces the same ratio it was itself calibrated from (round-trip)', () => {
+    const ratio = 0.3;
+    const mass = computeParticleMass(ratio * h, fluidDensity);
+    const isoLevel = computeIsoLevel(mass, h, computeIsoLevelCalibrationFactorForRadiusRatio(ratio));
+
+    const radius = computeIsoConsistentRadius({ isoLevel, radiusRatio: ratio, smoothingRadius: h, fluidDensity });
+
+    expect(radius).toBeCloseTo(ratio * h);
   });
 });
 

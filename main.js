@@ -8,6 +8,7 @@ import {
   computeIsoLevel,
   computeGradientMagnitudeBound,
   computeIsoLevelCalibrationFactorForRadiusRatio,
+  computeIsoConsistentRadius,
 } from './rendering/densityField.js';
 import {
   computeLineSeedPositions,
@@ -19,10 +20,10 @@ import {
   swapDropState,
 } from './simulation/dropState.js';
 import {
-  computeInitialPhases,
+  initializePairState,
   makePairState,
   swapPairState,
-} from './simulation/dripState.js';
+} from './simulation/dripPhaseSystem.js';
 import {
   makeDripComputePass,
   writeDripPhysicsUniforms,
@@ -54,10 +55,8 @@ const ANCHOR_RADIUS_TO_H_RATIO = 0.3;
 const DRIP_RADIUS_TO_H_RATIO = 0.3;
 const ISO_LEVEL_C = computeIsoLevelCalibrationFactorForRadiusRatio(DRIP_RADIUS_TO_H_RATIO);
 
-const LINE_Y = 0.8;
+const LINE_Y = 1.2;
 const RESPAWN_Y = LINE_Y - 6;
-const MU = 9;
-const GAMMA = 0.2;
 
 const NOISE_SCALE = 9;
 const NOISE_SPEED = 0.5;
@@ -76,8 +75,15 @@ async function main() {
   const focalLength = 1 / Math.tan(FOV_VERTICAL / 2);
 
   const H = computeSmoothingRadiusFromLineSpan({ ballCount: PAIR_COUNT, lineSpanWidth });
-  const ANCHOR_RADIUS = ANCHOR_RADIUS_TO_H_RATIO * H;
   const DRIP_RADIUS = DRIP_RADIUS_TO_H_RATIO * H;
+  const dripMass = computeParticleMass(DRIP_RADIUS, FLUID_DENSITY);
+  const isoLevel = computeIsoLevel(dripMass, H, ISO_LEVEL_C);
+  const ANCHOR_RADIUS = computeIsoConsistentRadius({
+    isoLevel,
+    radiusRatio: ANCHOR_RADIUS_TO_H_RATIO,
+    smoothingRadius: H,
+    fluidDensity: FLUID_DENSITY,
+  });
   const MAX_RAY_DISTANCE = lineSpanWidth + TRACE_BOUND_MARGIN_IN_H * H;
   const TRACE_HALF_EXTENTS = [
     lineSpanWidth / 2 + TRACE_BOUND_MARGIN_IN_H * H,
@@ -95,8 +101,9 @@ async function main() {
   const dropState = makeDropState(graphicsContext.device, registry, DROP_COUNT);
   graphicsContext.device.queue.writeBuffer(getCurrentDropBuffer(dropState), 0, packedDrops);
 
-  const initialPhases = computeInitialPhases(PAIR_COUNT, ACTIVE_PAIR_INDEX);
-  const pairState = makePairState(graphicsContext.device, registry, PAIR_COUNT, initialPhases);
+  const initialPairStates = Array.from({ length: PAIR_COUNT }, (_, pairIndex) =>
+    initializePairState({ tNow: 0, startGrowing: pairIndex === ACTIVE_PAIR_INDEX }));
+  const pairState = makePairState(graphicsContext.device, registry, PAIR_COUNT, initialPairStates);
 
   const raymarcher = makeDropRaymarcher(graphicsContext.device, graphicsContext.presentationFormat);
   const computePass = makeDripComputePass(graphicsContext.device);
@@ -117,24 +124,22 @@ async function main() {
   ];
 
   const anchorMass = computeParticleMass(ANCHOR_RADIUS, FLUID_DENSITY);
-  const dripMass = computeParticleMass(DRIP_RADIUS, FLUID_DENSITY);
-  const isoLevel = computeIsoLevel(dripMass, H, ISO_LEVEL_C);
   const gradientMagnitudeMax = computeGradientMagnitudeBound(anchorMass, H, N_LOCAL);
 
   let frameCommandEncoder = null;
+  let simulationElapsedTime = 0;
 
   function updateSimulation(dt) {
+    simulationElapsedTime += dt;
     writeDripPhysicsUniforms(computePass, {
       h: H,
-      gamma: GAMMA,
-      mu: MU,
+      tNow: simulationElapsedTime,
       dt,
       fluidDensity: FLUID_DENSITY,
       respawnY: RESPAWN_Y,
       baseRadius: DRIP_RADIUS,
       anchorBaseRadius: ANCHOR_RADIUS,
       dropCount: DROP_COUNT,
-      pairCount: PAIR_COUNT,
     });
 
     frameCommandEncoder ??= graphicsContext.device.createCommandEncoder();

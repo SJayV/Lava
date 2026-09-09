@@ -1,17 +1,19 @@
 import { getDensityFieldShaderChunk } from '../rendering/densityField.js';
 import { getDripPhysicsShaderChunk } from './dripPhysics.js';
+import { getDripPhaseSystemShaderChunk } from './dripPhaseSystem.js';
 
-const UNIFORM_BUFFER_SIZE = 3 * 16;
+const UNIFORM_BUFFER_SIZE = 2 * 16;
 
 // ───── WGSL SHADER ─────
 
 export const SHADER_SOURCE = /* wgsl */ `
-const GRAVITY: f32 = 1.0;
+const GRAVITY: f32 = 3.0;
+const GAMMA: f32 = 0.1;
+const RESPAWN_OVERSHOOT: f32 = 1.0;
 
 struct DripUniforms {
-  hGammaMu: vec4<f32>,
-  dtFluidDensityRespawnY: vec4<f32>,
-  dripRadiusDropCountPairCountAnchorRadius: vec4<f32>,
+  hTNowDtFluidDensity: vec4<f32>,
+  respawnYBaseRadiusDropCountAnchorRadius: vec4<f32>,
 }
 
 struct Drop {
@@ -21,24 +23,24 @@ struct Drop {
 
 @group(0) @binding(0) var<uniform> uniforms: DripUniforms;
 @group(0) @binding(1) var<storage, read> currentDrops: array<Drop>;
-@group(0) @binding(2) var<storage, read> currentPairState: array<f32>;
+@group(0) @binding(2) var<storage, read> currentPairState: array<PairState>;
 @group(0) @binding(3) var<storage, read_write> nextDrops: array<Drop>;
-@group(0) @binding(4) var<storage, read_write> nextPairState: array<f32>;
+@group(0) @binding(4) var<storage, read_write> nextPairState: array<PairState>;
 
 ${getDensityFieldShaderChunk()}
 ${getDripPhysicsShaderChunk()}
+${getDripPhaseSystemShaderChunk()}
 
 @compute @workgroup_size(1)
 fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
-  let h = uniforms.hGammaMu.x;
-  let gamma = uniforms.hGammaMu.y;
-  let mu = uniforms.hGammaMu.z;
-  let dt = uniforms.dtFluidDensityRespawnY.x;
-  let fluidDensity = uniforms.dtFluidDensityRespawnY.y;
-  let respawnY = uniforms.dtFluidDensityRespawnY.z;
-  let baseRadius = uniforms.dripRadiusDropCountPairCountAnchorRadius.x;
-  let dropCount = u32(uniforms.dripRadiusDropCountPairCountAnchorRadius.y);
-  let anchorBaseRadius = uniforms.dripRadiusDropCountPairCountAnchorRadius.w;
+  let h = uniforms.hTNowDtFluidDensity.x;
+  let tNow = uniforms.hTNowDtFluidDensity.y;
+  let dt = uniforms.hTNowDtFluidDensity.z;
+  let fluidDensity = uniforms.hTNowDtFluidDensity.w;
+  let respawnY = uniforms.respawnYBaseRadiusDropCountAnchorRadius.x;
+  let baseRadius = uniforms.respawnYBaseRadiusDropCountAnchorRadius.y;
+  let dropCount = u32(uniforms.respawnYBaseRadiusDropCountAnchorRadius.z);
+  let anchorBaseRadius = uniforms.respawnYBaseRadiusDropCountAnchorRadius.w;
 
   let i = globalId.x;
   if (i >= dropCount) {
@@ -47,16 +49,8 @@ fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
 
   let isDrip = (i % 2u) == 1u;
   if (!isDrip) {
-    let dripIndex = i + 1u;
-    let separation = length(currentDrops[dripIndex].positionAndRadius.xyz - currentDrops[i].positionAndRadius.xyz);
-    let anchorBaseMass = computeParticleMass(anchorBaseRadius, fluidDensity);
-    let dripBaseMass = computeParticleMass(baseRadius, fluidDensity);
-    let kernelRatio = computeDensityKernel(separation, h) / computeDensityKernel(0.0, h);
-    let missingMass = dripBaseMass * (1.0 - kernelRatio);
-    let compensatedRadius = computeRadiusFromMass(anchorBaseMass + missingMass, fluidDensity);
-
     var next: Drop;
-    next.positionAndRadius = vec4<f32>(currentDrops[i].positionAndRadius.xyz, compensatedRadius);
+    next.positionAndRadius = vec4<f32>(currentDrops[i].positionAndRadius.xyz, anchorBaseRadius);
     next.velocityAndSpeed = vec4<f32>(0.0, 0.0, 0.0, 0.0);
     nextDrops[i] = next;
     return;
@@ -64,69 +58,49 @@ fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
 
   let pairIndex = i / 2u;
   let anchorIndex = i - 1u;
-  let phaseCode = currentPairState[pairIndex];
+  let pair = currentPairState[pairIndex];
   let anchorPosition = currentDrops[anchorIndex].positionAndRadius.xyz;
 
-  if (phaseCode == 0.0) {
-    var next: Drop;
-    next.positionAndRadius = vec4<f32>(anchorPosition, baseRadius);
-    next.velocityAndSpeed = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    nextDrops[i] = next;
-    nextPairState[pairIndex] = 0.0;
-    return;
-  }
+  // ───── DISPATCHER, WEIGHTS, BLENDING (the only phase-aware reads) ─────
+  let weights = computePhaseWeights(pair, tNow, 1e-6);
+  let gravity = blendPhaseValue(weights, getAttachedGravity(), getGrowingGravity(), getFallingGravity());
+  let drag = blendPhaseValue(weights, getAttachedDrag(), getGrowingDrag(), getFallingDrag());
 
+  // ───── FORCES (unconditional — no phase filtering, natural coalescing) ─────
   var force = vec3<f32>(0.0, 0.0, 0.0);
-  if (phaseCode == 1.0) {
-    let myPosition = currentDrops[i].positionAndRadius.xyz;
-    let myMass = computeParticleMass(currentDrops[i].positionAndRadius.w, fluidDensity);
-    for (var j = 0u; j < dropCount; j = j + 1u) {
-      if (j == i) {
-        continue;
-      }
-      let jIsDrip = (j % 2u) == 1u;
-      if (jIsDrip) {
-        let jPairIndex = j / 2u;
-        if (currentPairState[jPairIndex] == 2.0) {
-          continue;
-        }
-      }
-      let jPosition = currentDrops[j].positionAndRadius.xyz;
-      let jMass = computeParticleMass(currentDrops[j].positionAndRadius.w, fluidDensity);
-      force = force + computeCohesionForce(myPosition, jPosition, myMass, jMass, gamma, h);
+  let myPosition = currentDrops[i].positionAndRadius.xyz;
+  let myMass = computeParticleMass(currentDrops[i].positionAndRadius.w, fluidDensity);
+  for (var j = 0u; j < dropCount; j = j + 1u) {
+    if (j == i) {
+      continue;
     }
+    let jPosition = currentDrops[j].positionAndRadius.xyz;
+    let jMass = computeParticleMass(currentDrops[j].positionAndRadius.w, fluidDensity);
+    force = force + computeCohesionForce(myPosition, jPosition, myMass, jMass, GAMMA, h);
   }
 
   let integrationMass = computeParticleMass(baseRadius, fluidDensity);
-  let acceleration = force / integrationMass + vec3<f32>(0.0, -GRAVITY, 0.0);
+  let acceleration = force / integrationMass + vec3<f32>(0.0, -gravity, 0.0);
 
   let oldVelocity = currentDrops[i].velocityAndSpeed.xyz;
   let oldPosition = currentDrops[i].positionAndRadius.xyz;
-  let newVelocity = oldVelocity * (1.0 - mu * dt) + acceleration * dt;
+  let newVelocity = oldVelocity * (1.0 - drag * dt) + acceleration * dt;
   let newPosition = oldPosition + newVelocity * dt;
 
-  if (phaseCode == 2.0 && newPosition.y < respawnY) {
-    var resetDrop: Drop;
-    resetDrop.positionAndRadius = vec4<f32>(anchorPosition, baseRadius);
-    resetDrop.velocityAndSpeed = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-    nextDrops[i] = resetDrop;
-    nextPairState[pairIndex] = 1.0;
-    return;
-  }
-
-  var newPhaseCode = phaseCode;
-  if (phaseCode == 1.0) {
-    let separation = length(newPosition - anchorPosition);
-    if (separation > h) {
-      newPhaseCode = 2.0;
-    }
-  }
+  let separation = length(newPosition - anchorPosition);
+  let nextPair = scheduleTick(pair, tNow, separation, newPosition.y, h, respawnY, pairIndex);
 
   var next: Drop;
   next.positionAndRadius = vec4<f32>(newPosition, baseRadius);
   next.velocityAndSpeed = vec4<f32>(newVelocity, length(newVelocity));
+
+  if (getPhaseCode(nextPair) == PHASE_ATTACHED && getPhaseCode(pair) == PHASE_FALLING) {
+    next.positionAndRadius = vec4<f32>(anchorPosition + vec3<f32>(0.0, RESPAWN_OVERSHOOT, 0.0), baseRadius);
+    next.velocityAndSpeed = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  }
+
   nextDrops[i] = next;
-  nextPairState[pairIndex] = newPhaseCode;
+  nextPairState[pairIndex] = nextPair;
 }
 `;
 
@@ -159,9 +133,8 @@ export function makeDripComputePass(device) {
 
 export function writeDripPhysicsUniforms(computePass, view) {
   const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
-  data.set([view.h, view.gamma, view.mu, 0], 0);
-  data.set([view.dt, view.fluidDensity, view.respawnY, 0], 4);
-  data.set([view.baseRadius, view.dropCount, view.pairCount, view.anchorBaseRadius], 8);
+  data.set([view.h, view.tNow, view.dt, view.fluidDensity], 0);
+  data.set([view.respawnY, view.baseRadius, view.dropCount, view.anchorBaseRadius], 4);
   computePass.device.queue.writeBuffer(computePass.uniformBuffer, 0, data);
 }
 
