@@ -37,12 +37,18 @@ to make failing code pass.
         translate. Likely needs a shape parameter (e.g. anisotropic stretch
         along the anchor-drip axis, scaled by separation/h) fed into the
         density field, not just a bigger/smaller sphere radius.
-- [ ] **Step 3 — 3D turbulence noise, for color sampling**
+- [x] **Step 3 — 3D turbulence noise, for color sampling**
       `rendering/turbulenceNoise.js` (hash + fbm), wired only into shading
-      color (`heatValue`) — not yet into surface perturbation. PLAN.md §1.4.
-- [ ] **Step 4 — randomness, for organic/natural movement**
-      Per-pair independent random timers for leaving `ATTACHED` (PLAN.md §2.1),
-      lateral wander during `FALLING`.
+      color (`heatValue`, via `rendering/temperatureColorRamp.js`) — not yet
+      into surface perturbation. PLAN.md §1.4.
+- [x] **Step 4 — randomness, for organic/natural movement**
+      Per-pair independent random hold duration before leaving `ATTACHED`,
+      derived deterministically per pair from `hashLattice3D` (PLAN.md §2.1).
+      Superseded the originally-planned discrete phase FSM with a continuous
+      Gaussian-bump phase-weight blend (`simulation/dripPhaseSystem.js`) for
+      smooth, causally-correct transitions — see that module for the
+      `<phase>ShouldExit`/`activate<Phase>` scheduler pattern. Lateral wander
+      during `FALLING` not yet added.
 - [ ] **Step 5 — noise, for organically perturbed surface**
       Turbulence noise folded into the density field itself
       (`Â(x,t) = A(x) + β·N(x,t)`, PLAN.md §1.3).
@@ -55,6 +61,10 @@ to make failing code pass.
 
 - [x] Repo scaffolded, `origin` remote wired to `https://github.com/SJayV/Lava`
 - [x] Initial commit pushed
-- [ ] CI pipeline (GitHub Actions): run tests + lint on push/PR
-- [ ] GitHub Pages deploy — **on hold until Step 3 is done**, per explicit
-      instruction; do not wire this up earlier even if CI is otherwise ready
+- [x] CI pipeline (GitHub Actions): run tests + lint on push/PR
+      (`.github/workflows/ci.yml`)
+- [x] GitHub Pages deploy — `.github/workflows/deploy.yml` copies only the
+      runtime-needed files (`index.html`, `main.js`, `core/`, `rendering/`,
+      `simulation/`, `parameters/`) into `_site` and deploys via
+      `actions/deploy-pages`; Pages source set to "GitHub Actions" in repo
+      settings
