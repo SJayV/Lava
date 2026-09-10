@@ -98,6 +98,41 @@ describe('fragmentMain color noise (heatValue)', () => {
   });
 });
 
+describe('applySurfacePerturbation', () => {
+  const body = _extractFunctionBody(SHADER_SOURCE, 'applySurfacePerturbation');
+
+  it('takes the already-computed density and the point, not the raw drop data', () => {
+    expect(SHADER_SOURCE).toContain('fn applySurfacePerturbation(density: f32, position: vec3<f32>)');
+  });
+
+  it('keeps beta and the perturbation frequency/speed scoped to this function', () => {
+    expect(body).toMatch(/const BETA:\s*f32\s*=/);
+    expect(body).toMatch(/const PERTURBATION_FREQUENCY:\s*f32\s*=/);
+    expect(body).toMatch(/const PERTURBATION_SPEED:\s*f32\s*=/);
+  });
+
+  it('calls the shared gradient noise primitive exactly once, never reimplementing it', () => {
+    const calls = body.match(/computeGradientNoise3D\(/g) ?? [];
+    expect(calls).toHaveLength(1);
+  });
+
+  it('does not use the expensive multi-octave field on this hot path', () => {
+    expect(body).not.toContain('computeTurbulence(');
+  });
+
+  it('applies the perturbation additively to the input density', () => {
+    expect(body).toMatch(/return density \+ BETA \* computeGradientNoise3D\(/);
+  });
+});
+
+describe('computeDensityField perturbation', () => {
+  const body = _extractFunctionBody(SHADER_SOURCE, 'computeDensityField');
+
+  it('routes its result through applySurfacePerturbation instead of returning the raw sum', () => {
+    expect(body).toMatch(/return applySurfacePerturbation\(total, position\);/);
+  });
+});
+
 describe('computeFieldGradientNormal', () => {
   it('still uses a live central-difference gradient (only once per hit, not per step)', () => {
     const normalBody = _extractFunctionBody(SHADER_SOURCE, 'computeFieldGradientNormal');

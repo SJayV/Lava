@@ -17,24 +17,8 @@ export function computeRadiusFromMass(mass, fluidDensity) {
   return Math.cbrt(mass / ((4 / 3) * Math.PI * fluidDensity));
 }
 
-export function computeDensityField(point, drops, smoothingRadius) {
-  let total = 0;
-  for (const drop of drops) {
-    const dx = point[0] - drop.position[0];
-    const dy = point[1] - drop.position[1];
-    const dz = point[2] - drop.position[2];
-    const distance = Math.hypot(dx, dy, dz);
-    total += drop.mass * computeDensityKernel(distance, smoothingRadius);
-  }
-  return total;
-}
-
 export function computeIsoLevel(mass, smoothingRadius, calibrationFactor) {
   return calibrationFactor * mass * computeDensityKernel(0, smoothingRadius);
-}
-
-export function computeIsosurfaceRadiusRatio(calibrationFactor) {
-  return Math.sqrt(1 - calibrationFactor ** (1 / 3));
 }
 
 export function computeIsoLevelCalibrationFactorForRadiusRatio(radiusRatio) {

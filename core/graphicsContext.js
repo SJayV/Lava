@@ -1,4 +1,4 @@
-const MAX_DEVICE_PIXEL_RATIO = 2;
+const RESOLUTION_SCALE = 0.7;
 
 export async function initializeGraphicsContext(canvas) {
   if (!navigator.gpu) {
@@ -14,7 +14,7 @@ export async function initializeGraphicsContext(canvas) {
   const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 
   function _configure() {
-    const pixelRatio = Math.min(window.devicePixelRatio, MAX_DEVICE_PIXEL_RATIO);
+    const pixelRatio = Math.min(window.devicePixelRatio, RESOLUTION_SCALE);
     canvas.width = Math.max(1, Math.floor(canvas.clientWidth * pixelRatio));
     canvas.height = Math.max(1, Math.floor(canvas.clientHeight * pixelRatio));
     canvasContext.configure({ device, format: presentationFormat, alphaMode: 'opaque' });

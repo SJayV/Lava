@@ -1,32 +1,5 @@
 const COHESION_NORMALIZATION = 32 / Math.PI;
 
-export function computeCohesionKernel(distance, smoothingRadius) {
-  if (distance <= 0 || distance > smoothingRadius) {
-    return 0;
-  }
-  const h6 = smoothingRadius ** 6;
-  const nearTerm = (smoothingRadius - distance) ** 3 * distance ** 3;
-  const value = distance <= 0.5 * smoothingRadius ? 2 * nearTerm - h6 / 64 : nearTerm;
-  return (COHESION_NORMALIZATION / smoothingRadius ** 9) * value;
-}
-
-export function computeCohesionForce(positionI, positionJ, massI, massJ, gamma, smoothingRadius) {
-  const offset = [positionI[0] - positionJ[0], positionI[1] - positionJ[1], positionI[2] - positionJ[2]];
-  const distance = Math.hypot(offset[0], offset[1], offset[2]);
-  if (distance < 1e-6 || distance > smoothingRadius) {
-    return [0, 0, 0];
-  }
-  const kernel = computeCohesionKernel(distance, smoothingRadius);
-  const scale = (-gamma * massI * massJ * kernel) / distance;
-  return [offset[0] * scale, offset[1] * scale, offset[2] * scale];
-}
-
-export function computeSemiImplicitEulerStep({ position, velocity, acceleration, damping, dt }) {
-  const nextVelocity = velocity.map((v, i) => v * (1 - damping * dt) + acceleration[i] * dt);
-  const nextPosition = position.map((x, i) => x + nextVelocity[i] * dt);
-  return { position: nextPosition, velocity: nextVelocity };
-}
-
 // ───── WGSL CHUNK ─────
 
 export function getDripPhysicsShaderChunk() {
