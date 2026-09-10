@@ -2,18 +2,6 @@ export const YELLOW = [0.85, 0.45, 0.15];
 export const ORANGE = [0.8, 0.35, 0.07];
 export const RED = [0.7, 0.15, 0.05];
 
-const _lerp = (a, b, t) => a + (b - a) * t;
-const _smoothstep = (edge0, edge1, x) => {
-  const t = Math.min(Math.max((x - edge0) / (edge1 - edge0), 0), 1);
-  return t * t * (3 - 2 * t);
-};
-const _mixColor = (a, b, t) => [_lerp(a[0], b[0], t), _lerp(a[1], b[1], t), _lerp(a[2], b[2], t)];
-
-export function computeTemperatureColor(heatValue) {
-  const lowMix = _mixColor(YELLOW, ORANGE, _smoothstep(0.32, 0.5, heatValue));
-  return _mixColor(lowMix, RED, _smoothstep(0.5, 0.68, heatValue));
-}
-
 // ───── WGSL CHUNK ─────
 
 export function getTemperatureColorRampShaderChunk() {

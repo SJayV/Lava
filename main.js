@@ -36,6 +36,13 @@ import {
   makeRaymarchBindGroup,
   renderRaymarchPass,
 } from './rendering/dropRaymarcher.js';
+import {
+  MAIN_TEXTURE_FORMAT,
+  makePostProcessor,
+  resizePostProcessorIfNeeded,
+  getMainTextureView,
+  runPostProcessPass,
+} from './rendering/postProcessor.js';
 
 const PAIR_COUNT = 6;
 const DROP_COUNT = 2 * PAIR_COUNT;
@@ -61,6 +68,10 @@ const RESPAWN_Y = LINE_Y - 6;
 const NOISE_SCALE = 9;
 const NOISE_SPEED = 0.5;
 const NOISE_OCTAVES = 4;
+
+const BLOOM_THRESHOLD = 0.2;
+const BLOOM_INTENSITY = 1.1;
+const EXPOSURE = 1.5;
 
 async function main() {
   const canvas = document.getElementById('canvas');
@@ -105,7 +116,8 @@ async function main() {
     initializePairState({ tNow: 0, startGrowing: pairIndex === ACTIVE_PAIR_INDEX }));
   const pairState = makePairState(graphicsContext.device, registry, PAIR_COUNT, initialPairStates);
 
-  const raymarcher = makeDropRaymarcher(graphicsContext.device, graphicsContext.presentationFormat);
+  const raymarcher = makeDropRaymarcher(graphicsContext.device, MAIN_TEXTURE_FORMAT);
+  const postProcessor = makePostProcessor(graphicsContext.device, graphicsContext.presentationFormat);
   const computePass = makeDripComputePass(graphicsContext.device);
 
   const dropStateA = getBuffer(registry, 'dropStateA');
@@ -168,7 +180,7 @@ async function main() {
       minStep: 0.02 * H,
       maxStep: 0.5 * H,
       surfaceEpsilon: 0.0015,
-      maxTraceSteps: 32,
+      maxTraceSteps: 20,
       backgroundColor: [0.02, 0.02, 0.03],
       gradientMagnitudeMax,
       noiseScale: NOISE_SCALE,
@@ -177,12 +189,20 @@ async function main() {
       animationTime: performance.now() / 1000,
     });
 
+    resizePostProcessorIfNeeded(postProcessor, canvas.width, canvas.height);
+
     frameCommandEncoder ??= graphicsContext.device.createCommandEncoder();
     renderRaymarchPass(
       raymarcher,
       frameCommandEncoder,
-      graphicsContext.canvasContext.getCurrentTexture().createView(),
+      getMainTextureView(postProcessor),
       raymarchBindGroupsByActiveIndex[dropState.activeIndex],
+    );
+    runPostProcessPass(
+      postProcessor,
+      frameCommandEncoder,
+      graphicsContext.canvasContext.getCurrentTexture().createView(),
+      { threshold: BLOOM_THRESHOLD, intensity: BLOOM_INTENSITY, exposure: EXPOSURE },
     );
     graphicsContext.device.queue.submit([frameCommandEncoder.finish()]);
     frameCommandEncoder = null;

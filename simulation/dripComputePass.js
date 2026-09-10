@@ -7,9 +7,9 @@ const UNIFORM_BUFFER_SIZE = 2 * 16;
 // ───── WGSL SHADER ─────
 
 export const SHADER_SOURCE = /* wgsl */ `
-const GRAVITY: f32 = 3.0;
-const GAMMA: f32 = 0.1;
-const RESPAWN_OVERSHOOT: f32 = 1.0;
+const GRAVITY: f32 = 1.8;
+const GAMMA: f32 = 0.3;
+const RESPAWN_OVERSHOOT: f32 = 1.5;
 
 struct DripUniforms {
   hTNowDtFluidDensity: vec4<f32>,

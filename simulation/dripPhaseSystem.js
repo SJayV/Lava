@@ -1,5 +1,5 @@
 import { registerBuffer, getBuffer } from '../core/resourceRegistry.js';
-import { getTurbulenceNoiseShaderChunk } from '../rendering/turbulenceNoise.js';
+import { getTurbulenceNoiseShaderChunk } from '../rendering/noise.js';
 
 const FLOATS_PER_PAIR_STATE = 4;
 const NEVER_TRIGGERED_MU = -1e9;
@@ -58,10 +58,10 @@ export function getDripPhaseSystemShaderChunk() {
     const SIGMA_ATTACHED: f32 = 1.5;
     const SIGMA_GROWING: f32 = 0.12;
     const SIGMA_FALLING: f32 = 0.12;
-    const HOLD_MIN: f32 = 1.0;
-    const HOLD_MAX: f32 = 14.5;
+    const HOLD_MIN: f32 = 4.0;
+    const HOLD_MAX: f32 = 24.5;
     const BASE_DRAG: f32 = 9.0;
-    const FALLING_DRAG_FACTOR: f32 = 0.005;
+    const FALLING_DRAG_FACTOR: f32 = 0.0005;
 
     const PHASE_ATTACHED: f32 = 0.0;
     const PHASE_GROWING: f32 = 1.0;

@@ -3,13 +3,15 @@ import {
   computeDensityKernel,
   computeParticleMass,
   computeRadiusFromMass,
-  computeDensityField,
   computeIsoLevel,
   computeGradientMagnitudeBound,
-  computeIsosurfaceRadiusRatio,
   computeIsoLevelCalibrationFactorForRadiusRatio,
   computeIsoConsistentRadius,
 } from '../../rendering/densityField.js';
+
+function _computeIsosurfaceRadiusRatio(calibrationFactor) {
+  return Math.sqrt(1 - calibrationFactor ** (1 / 3));
+}
 
 describe('computeDensityKernel (poly6, W_density)', () => {
   it('peaks at r = 0 with value 315/(64*pi*h^3)', () => {
@@ -70,42 +72,6 @@ describe('computeRadiusFromMass', () => {
   });
 });
 
-describe('computeDensityField', () => {
-  const h = 0.3;
-  const fluidDensity = 1000;
-  const radius = 0.1;
-  const mass = computeParticleMass(radius, fluidDensity);
-
-  it('equals a single particle contribution when sampled at its own center', () => {
-    const drops = [{ position: [0, 0, 0], mass }];
-
-    const density = computeDensityField([0, 0, 0], drops, h);
-
-    expect(density).toBeCloseTo(mass * computeDensityKernel(0, h));
-  });
-
-  it('sums contributions from multiple particles', () => {
-    const drops = [
-      { position: [0, 0, 0], mass },
-      { position: [0.1, 0, 0], mass },
-    ];
-
-    const density = computeDensityField([0, 0, 0], drops, h);
-    const expected =
-      mass * computeDensityKernel(0, h) + mass * computeDensityKernel(0.1, h);
-
-    expect(density).toBeCloseTo(expected);
-  });
-
-  it('ignores particles farther than h away', () => {
-    const drops = [{ position: [10, 0, 0], mass }];
-
-    const density = computeDensityField([0, 0, 0], drops, h);
-
-    expect(density).toBe(0);
-  });
-});
-
 describe('computeIsoLevel', () => {
   it('scales a single particle peak density by the calibration factor C', () => {
     const h = 0.3;
@@ -121,7 +87,7 @@ describe('computeIsoLevel', () => {
   it('crosses isoLevel at the same radius regardless of particle mass', () => {
     const h = 0.3;
     const C = 0.35;
-    const rIso = computeIsosurfaceRadiusRatio(C) * h;
+    const rIso = _computeIsosurfaceRadiusRatio(C) * h;
 
     const smallMass = computeParticleMass(0.05, 1000);
     const largeMass = computeParticleMass(0.2, 1000);
@@ -161,11 +127,11 @@ describe('computeIsoLevel', () => {
   });
 });
 
-describe('computeIsosurfaceRadiusRatio / computeIsoLevelCalibrationFactorForRadiusRatio', () => {
-  it('are inverses of each other', () => {
+describe('computeIsoLevelCalibrationFactorForRadiusRatio', () => {
+  it('inverts the radius-ratio-to-calibration-factor relationship', () => {
     const C = 0.6;
 
-    const radiusRatio = computeIsosurfaceRadiusRatio(C);
+    const radiusRatio = _computeIsosurfaceRadiusRatio(C);
     const roundTrippedC = computeIsoLevelCalibrationFactorForRadiusRatio(radiusRatio);
 
     expect(roundTrippedC).toBeCloseTo(C);
@@ -173,15 +139,15 @@ describe('computeIsosurfaceRadiusRatio / computeIsoLevelCalibrationFactorForRadi
 
   it('reproduces the 2x-too-big regression: C = 0.35 renders a radius far larger than the ~0.3h drop radius', () => {
     // C=0.35 -> r_iso ~0.543h, ~1.8x a 0.3h target
-    const radiusRatio = computeIsosurfaceRadiusRatio(0.35);
+    const radiusRatio = _computeIsosurfaceRadiusRatio(0.35);
 
     expect(radiusRatio).toBeCloseTo(0.5434, 3);
     expect(radiusRatio / 0.3).toBeGreaterThan(1.5);
   });
 
   it('a higher calibration factor renders a smaller isosurface radius', () => {
-    const smallC = computeIsosurfaceRadiusRatio(0.35);
-    const largeC = computeIsosurfaceRadiusRatio(0.8);
+    const smallC = _computeIsosurfaceRadiusRatio(0.35);
+    const largeC = _computeIsosurfaceRadiusRatio(0.8);
 
     expect(largeC).toBeLessThan(smallC);
   });

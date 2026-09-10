@@ -3,50 +3,6 @@ const HASH_PRIME_Y = 668265263;
 const HASH_PRIME_Z = 2147483647;
 const HASH_MIX_A = 1274126177;
 
-export function hashLattice3D(x, y, z) {
-  let h = (x * HASH_PRIME_X + y * HASH_PRIME_Y + z * HASH_PRIME_Z) | 0;
-  h = Math.imul(h ^ (h >>> 13), HASH_MIX_A);
-  h = h ^ (h >>> 16);
-  return (h >>> 0) / 4294967295;
-}
-
-export function computeValueNoise3D(x, y, z) {
-  const x0 = Math.floor(x);
-  const y0 = Math.floor(y);
-  const z0 = Math.floor(z);
-  const tx = x - x0;
-  const ty = y - y0;
-  const tz = z - z0;
-
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const corner = (dx, dy, dz) => hashLattice3D(x0 + dx, y0 + dy, z0 + dz);
-
-  const x00 = lerp(corner(0, 0, 0), corner(1, 0, 0), tx);
-  const x10 = lerp(corner(0, 1, 0), corner(1, 1, 0), tx);
-  const x01 = lerp(corner(0, 0, 1), corner(1, 0, 1), tx);
-  const x11 = lerp(corner(0, 1, 1), corner(1, 1, 1), tx);
-  const y0v = lerp(x00, x10, ty);
-  const y1v = lerp(x01, x11, ty);
-  return lerp(y0v, y1v, tz);
-}
-
-export function computeTurbulence({ position, time, octaves, frequency = 1, speed = 1, gain = 0.5 }) {
-  const [x, y, z] = position;
-  const shiftedZ = z * frequency + time * speed;
-  const shiftedX = x * frequency;
-  const shiftedY = y * frequency;
-
-  let total = 0;
-  let weightSum = 0;
-  for (let k = 0; k < octaves; k += 1) {
-    const octaveScale = 2 ** k;
-    const weight = gain ** k;
-    total += weight * computeValueNoise3D(shiftedX * octaveScale, shiftedY * octaveScale, shiftedZ * octaveScale);
-    weightSum += weight;
-  }
-  return total / weightSum;
-}
-
 // ───── WGSL CHUNK ─────
 
 export function getTurbulenceNoiseShaderChunk() {
@@ -56,6 +12,39 @@ export function getTurbulenceNoiseShaderChunk() {
       h = (h ^ (h >> 13u)) * ${HASH_MIX_A}u;
       h = h ^ (h >> 16u);
       return f32(h) / 4294967295.0;
+    }
+
+    fn hashGradient3D(x: i32, y: i32, z: i32) -> vec3<f32> {
+      let theta = hashLattice3D(x, y, z) * 6.28318530718;
+      let cosPhi = hashLattice3D(x, y, z + 1) * 2.0 - 1.0;
+      let sinPhi = sqrt(max(0.0, 1.0 - cosPhi * cosPhi));
+      return vec3<f32>(sinPhi * cos(theta), sinPhi * sin(theta), cosPhi);
+    }
+
+    fn computeGradientNoise3D(position: vec3<f32>) -> f32 {
+      let base = floor(position);
+      let f = position - base;
+      let x0 = i32(base.x);
+      let y0 = i32(base.y);
+      let z0 = i32(base.z);
+      let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+
+      let n000 = dot(hashGradient3D(x0, y0, z0), f - vec3<f32>(0.0, 0.0, 0.0));
+      let n100 = dot(hashGradient3D(x0 + 1, y0, z0), f - vec3<f32>(1.0, 0.0, 0.0));
+      let n010 = dot(hashGradient3D(x0, y0 + 1, z0), f - vec3<f32>(0.0, 1.0, 0.0));
+      let n110 = dot(hashGradient3D(x0 + 1, y0 + 1, z0), f - vec3<f32>(1.0, 1.0, 0.0));
+      let n001 = dot(hashGradient3D(x0, y0, z0 + 1), f - vec3<f32>(0.0, 0.0, 1.0));
+      let n101 = dot(hashGradient3D(x0 + 1, y0, z0 + 1), f - vec3<f32>(1.0, 0.0, 1.0));
+      let n011 = dot(hashGradient3D(x0, y0 + 1, z0 + 1), f - vec3<f32>(0.0, 1.0, 1.0));
+      let n111 = dot(hashGradient3D(x0 + 1, y0 + 1, z0 + 1), f - vec3<f32>(1.0, 1.0, 1.0));
+
+      let nx00 = mix(n000, n100, u.x);
+      let nx10 = mix(n010, n110, u.x);
+      let nx01 = mix(n001, n101, u.x);
+      let nx11 = mix(n011, n111, u.x);
+      let nxy0 = mix(nx00, nx10, u.y);
+      let nxy1 = mix(nx01, nx11, u.y);
+      return mix(nxy0, nxy1, u.z);
     }
 
     fn computeValueNoise3D(position: vec3<f32>) -> f32 {

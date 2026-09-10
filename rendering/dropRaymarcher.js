@@ -1,6 +1,7 @@
 import { getDensityFieldShaderChunk } from './densityField.js';
-import { getTurbulenceNoiseShaderChunk } from './turbulenceNoise.js';
+import { getTurbulenceNoiseShaderChunk } from './noise.js';
 import { getTemperatureColorRampShaderChunk } from './temperatureColorRamp.js';
+import { getShadingShaderChunk } from './shading.js';
 
 const UNIFORM_BUFFER_SIZE = 10 * 16;
 
@@ -12,12 +13,12 @@ struct RaymarchUniforms {
   cameraUp: vec4<f32>,
   cameraForward: vec4<f32>,
   cameraEye: vec4<f32>,
-  resolutionAndCamera: vec4<f32>,      // x=width, y=height, z=aspectRatio, w=focalLength
-  traceBoundsAndMaxDist: vec4<f32>,    // xyz=trace half-extents, w=maxRayDistance
-  fieldParams: vec4<f32>,              // x=h, y=isoLevel, z=fluidDensity, w=dropCount
-  stepParams: vec4<f32>,               // x=minStep, y=maxStep, z=surfaceEpsilon, w=maxTraceSteps
-  backgroundColor: vec4<f32>,          // xyz=background rgb, w=gradientMagnitudeMax (|∇A_max|, PLAN.md §1.3)
-  noiseParams: vec4<f32>,               // x=noiseScale, y=noiseSpeed, z=noiseOctaves, w=animationTime
+  resolutionAndCamera: vec4<f32>,
+  traceBoundsAndMaxDist: vec4<f32>,
+  fieldParams: vec4<f32>,
+  stepParams: vec4<f32>,
+  backgroundColor: vec4<f32>,
+  noiseParams: vec4<f32>,
 }
 
 struct Drop {
@@ -31,6 +32,7 @@ struct Drop {
 ${getDensityFieldShaderChunk()}
 ${getTurbulenceNoiseShaderChunk()}
 ${getTemperatureColorRampShaderChunk()}
+${getShadingShaderChunk()}
 
 fn computeDensityField(position: vec3<f32>, relevantMask: u32) -> f32 {
   var total = 0.0;
@@ -47,7 +49,16 @@ fn computeDensityField(position: vec3<f32>, relevantMask: u32) -> f32 {
     let mass = computeParticleMass(drop.positionAndRadius.w, fluidDensity);
     total = total + mass * computeDensityKernel(distance, h);
   }
-  return total;
+  return applySurfacePerturbation(total, position);
+}
+
+fn applySurfacePerturbation(density: f32, position: vec3<f32>) -> f32 {
+  const BETA: f32 = 5.2;
+  const PERTURBATION_FREQUENCY: f32 = 0.8;
+  const PERTURBATION_SPEED: f32 = 0.4;
+  let time = uniforms.noiseParams.w;
+  let scaled = position * PERTURBATION_FREQUENCY + vec3<f32>(0.0, 0.0, time * PERTURBATION_SPEED);
+  return density + BETA * computeGradientNoise3D(scaled);
 }
 
 fn computeFieldGradientNormal(position: vec3<f32>, relevantMask: u32) -> vec3<f32> {
@@ -60,7 +71,7 @@ fn computeFieldGradientNormal(position: vec3<f32>, relevantMask: u32) -> vec3<f3
     computeDensityField(position + dy, relevantMask) - computeDensityField(position - dy, relevantMask),
     computeDensityField(position + dz, relevantMask) - computeDensityField(position - dz, relevantMask),
   );
-  return normalize(gradient);
+  return -normalize(gradient);
 }
 
 fn computeTraceBoundsIntersection(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> vec2<f32> {
@@ -196,7 +207,7 @@ fn fragmentMain(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f3
 
   let result = traceDensityIsosurface(uniforms.cameraEye.xyz, rayDirection);
   if (!result.hit) {
-    return vec4<f32>(uniforms.backgroundColor.xyz, 1.0);
+    return vec4<f32>(uniforms.backgroundColor.xyz, 0.0);
   }
 
   let noiseScale = uniforms.noiseParams.x;
@@ -206,7 +217,12 @@ fn fragmentMain(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f3
   let heatValue = computeTurbulence(result.position, animationTime, noiseOctaves, noiseScale, noiseSpeed);
 
   let lavaColor = computeTemperatureColor(heatValue);
-  return vec4<f32>(lavaColor, 1.0);
+
+  let normal = computeFieldGradientNormal(result.position, result.relevantMask);
+  let viewDirection = normalize(uniforms.cameraEye.xyz - result.position);
+  let shadedColor = computeShadedColor(lavaColor, normal, viewDirection);
+
+  return vec4<f32>(shadedColor, 1.0);
 }
 `;
 
