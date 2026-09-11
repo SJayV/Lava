@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SHADER_SOURCE } from '../../simulation/dripComputePass.js';
+import { SHADER_SOURCE } from '../../shaders/simulationShader.js';
 
 function _extractFunctionBody(source, functionName) {
   const start = source.indexOf(`fn ${functionName}(`);

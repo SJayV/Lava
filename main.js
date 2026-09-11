@@ -1,77 +1,13 @@
-import { initializeGraphicsContext } from './core/graphicsContext.js';
-import { makeResourceRegistry, getBuffer } from './core/resourceRegistry.js';
-import { makeFrameLoop } from './core/frameLoop.js';
-import { makeParameterStore, getParameterValue } from './parameters/parameterStore.js';
-import { computeCameraBasisVectors, computeLineSpanWidth } from './rendering/cameraProjection.js';
-import {
-  computeParticleMass,
-  computeIsoLevel,
-  computeGradientMagnitudeBound,
-  computeIsoLevelCalibrationFactorForRadiusRatio,
-  computeIsoConsistentRadius,
-} from './rendering/densityField.js';
-import {
-  computeLineSeedPositions,
-  computeSmoothingRadiusFromLineSpan,
-  makeDropRecord,
-  packDropRecords,
-  makeDropState,
-  getCurrentDropBuffer,
-  swapDropState,
-} from './simulation/dropState.js';
-import {
-  initializePairState,
-  makePairState,
-  swapPairState,
-} from './simulation/dripPhaseSystem.js';
-import {
-  makeDripComputePass,
-  writeDripPhysicsUniforms,
-  makeDripComputeBindGroup,
-  runDripComputePass,
-} from './simulation/dripComputePass.js';
-import {
-  makeDropRaymarcher,
-  writeRaymarchUniforms,
-  makeRaymarchBindGroup,
-  renderRaymarchPass,
-} from './rendering/dropRaymarcher.js';
-import {
-  MAIN_TEXTURE_FORMAT,
-  makePostProcessor,
-  resizePostProcessorIfNeeded,
-  getMainTextureView,
-  runPostProcessPass,
-} from './rendering/postProcessor.js';
+import { initializeGraphicsContext, makeResourceRegistry, getBuffer, MAIN_TEXTURE_FORMAT, makePostProcessor, resizePostProcessorIfNeeded, getMainTextureView, runPostProcessPass } from './src/gpuSetup.js';
+import { makeParameterStore, getParameterValue } from './src/parameters.js';
+import { PAIR_COUNT, DROP_COUNT, FLUID_DENSITY, RESPAWN_Y } from './src/constants.js';
+import { CAMERA_EYE, CAMERA_TARGET, CAMERA_UP, FOV_VERTICAL, TRACE_BOUND_MARGIN_IN_H, computeCameraBasisVectors, computeLineSpanWidth, makeDropRaymarcher, writeRaymarchUniforms, makeRaymarchBindGroup, renderRaymarchPass } from './src/renderer.js';
+import { N_LOCAL, ANCHOR_RADIUS_TO_H_RATIO, DRIP_RADIUS_TO_H_RATIO, ISO_LEVEL_C, computeParticleMass, computeIsoLevel, computeIsoConsistentRadius, computeGradientMagnitudeBound, makeDripComputePass, writeDripPhysicsUniforms, makeDripComputeBindGroup, runDripComputePass } from './src/simulation.js';
+import { LINE_Y, computeSmoothingRadiusFromLineSpan, computeLineSeedPositions, makeDropRecord, packDropRecords, makeDropState, getCurrentDropBuffer, swapDropState, initializePairState, makePairState, swapPairState } from './src/state.js';
 
-const PAIR_COUNT = 6;
-const DROP_COUNT = 2 * PAIR_COUNT;
 const ACTIVE_PAIR_INDEX = 3;
-const FIXED_TIMESTEP = 1 / 120;
-const MAXIMUM_SUBSTEPS_PER_FRAME = 8;
 
-const CAMERA_EYE = [0, -0.6, 4];
-const CAMERA_TARGET = [0, -0.6, 0];
-const CAMERA_UP = [0, 1, 0];
-const FOV_VERTICAL = Math.PI / 4;
-
-const FLUID_DENSITY = 100;
-const N_LOCAL = 4;
-const TRACE_BOUND_MARGIN_IN_H = 1;
-const ANCHOR_RADIUS_TO_H_RATIO = 0.3;
-const DRIP_RADIUS_TO_H_RATIO = 0.3;
-const ISO_LEVEL_C = computeIsoLevelCalibrationFactorForRadiusRatio(DRIP_RADIUS_TO_H_RATIO);
-
-const LINE_Y = 1.2;
-const RESPAWN_Y = LINE_Y - 6;
-
-const NOISE_SCALE = 9;
-const NOISE_SPEED = 0.5;
-const NOISE_OCTAVES = 4;
-
-const BLOOM_THRESHOLD = 0.2;
-const BLOOM_INTENSITY = 1.1;
-const EXPOSURE = 1.5;
+// ───── INITIALIZATION ─────
 
 async function main() {
   const canvas = document.getElementById('canvas');
@@ -109,7 +45,7 @@ async function main() {
   ]);
   const packedDrops = packDropRecords(drops);
 
-  const dropState = makeDropState(graphicsContext.device, registry, DROP_COUNT);
+  const dropState = makeDropState(registry, DROP_COUNT);
   graphicsContext.device.queue.writeBuffer(getCurrentDropBuffer(dropState), 0, packedDrops);
 
   const initialPairStates = Array.from({ length: PAIR_COUNT }, (_, pairIndex) =>
@@ -125,7 +61,6 @@ async function main() {
   const pairStateA = getBuffer(registry, 'pairStateA');
   const pairStateB = getBuffer(registry, 'pairStateB');
 
-  // one bind group per ping-pong direction, built once — never recreated per frame
   const computeBindGroupsByActiveIndex = [
     makeDripComputeBindGroup(computePass, dropStateA, pairStateA, dropStateB, pairStateB),
     makeDripComputeBindGroup(computePass, dropStateB, pairStateB, dropStateA, pairStateA),
@@ -179,13 +114,9 @@ async function main() {
       dropCount: DROP_COUNT,
       minStep: 0.02 * H,
       maxStep: 0.5 * H,
-      surfaceEpsilon: 0.0015,
       maxTraceSteps: 20,
       backgroundColor: [0.02, 0.02, 0.03],
       gradientMagnitudeMax,
-      noiseScale: NOISE_SCALE,
-      noiseSpeed: NOISE_SPEED,
-      noiseOctaves: NOISE_OCTAVES,
       animationTime: performance.now() / 1000,
     });
 
@@ -202,20 +133,38 @@ async function main() {
       postProcessor,
       frameCommandEncoder,
       graphicsContext.canvasContext.getCurrentTexture().createView(),
-      { threshold: BLOOM_THRESHOLD, intensity: BLOOM_INTENSITY, exposure: EXPOSURE },
     );
     graphicsContext.device.queue.submit([frameCommandEncoder.finish()]);
     frameCommandEncoder = null;
   }
 
-  const frameLoop = makeFrameLoop({
-    fixedTimestep: FIXED_TIMESTEP,
-    maximumSubstepsPerFrame: MAXIMUM_SUBSTEPS_PER_FRAME,
-    getTimeScale: () => getParameterValue(parameterStore, 'simulationTimeScale'),
-    updateSimulation,
-    renderFrame,
-  });
-  frameLoop.start();
+  // ───── ANIMATION LOOP ─────
+
+  const FIXED_TIMESTEP = 1 / 120;
+  const MAXIMUM_SUBSTEPS_PER_FRAME = 8;
+
+  let accumulatedSeconds = 0;
+  let lastTimestampMs = null;
+
+  function onAnimationFrame(timestampMs) {
+    if (lastTimestampMs !== null) {
+      const elapsedSeconds = (timestampMs - lastTimestampMs) / 1000;
+      accumulatedSeconds += elapsedSeconds * getParameterValue(parameterStore, 'simulationTimeScale');
+
+      let remainingSubsteps = MAXIMUM_SUBSTEPS_PER_FRAME;
+      while (accumulatedSeconds >= FIXED_TIMESTEP && remainingSubsteps > 0) {
+        updateSimulation(FIXED_TIMESTEP);
+        accumulatedSeconds -= FIXED_TIMESTEP;
+        remainingSubsteps -= 1;
+      }
+
+      renderFrame();
+    }
+    lastTimestampMs = timestampMs;
+    requestAnimationFrame(onAnimationFrame);
+  }
+
+  requestAnimationFrame(onAnimationFrame);
 }
 
 main();

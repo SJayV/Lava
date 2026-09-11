@@ -3,9 +3,7 @@ const HASH_PRIME_Y = 668265263;
 const HASH_PRIME_Z = 2147483647;
 const HASH_MIX_A = 1274126177;
 
-// ───── WGSL CHUNK ─────
-
-export function getTurbulenceNoiseShaderChunk() {
+export function getNoiseChunk() {
   return /* wgsl */ `
     fn hashLattice3D(x: i32, y: i32, z: i32) -> f32 {
       var h = bitcast<u32>(x * ${HASH_PRIME_X} + y * ${HASH_PRIME_Y} + z * ${HASH_PRIME_Z});

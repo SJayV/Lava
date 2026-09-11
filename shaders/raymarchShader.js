@@ -1,11 +1,6 @@
-import { getDensityFieldShaderChunk } from './densityField.js';
-import { getTurbulenceNoiseShaderChunk } from './noise.js';
-import { getTemperatureColorRampShaderChunk } from './temperatureColorRamp.js';
-import { getShadingShaderChunk } from './shading.js';
-
-const UNIFORM_BUFFER_SIZE = 10 * 16;
-
-// ───── WGSL SHADER ─────
+import { getDensityKernelChunk, getParticleMassChunk } from '../shaderChunks/shapeChunk.js';
+import { getNoiseChunk } from '../shaderChunks/noiseChunk.js';
+import { getColorChunk } from '../shaderChunks/colorChunk.js';
 
 export const SHADER_SOURCE = /* wgsl */ `
 struct RaymarchUniforms {
@@ -29,10 +24,10 @@ struct Drop {
 @group(0) @binding(0) var<uniform> uniforms: RaymarchUniforms;
 @group(0) @binding(1) var<storage, read> drops: array<Drop>;
 
-${getDensityFieldShaderChunk()}
-${getTurbulenceNoiseShaderChunk()}
-${getTemperatureColorRampShaderChunk()}
-${getShadingShaderChunk()}
+${getDensityKernelChunk()}
+${getParticleMassChunk()}
+${getNoiseChunk()}
+${getColorChunk()}
 
 fn computeDensityField(position: vec3<f32>, relevantMask: u32) -> f32 {
   var total = 0.0;
@@ -113,9 +108,6 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
   let h = uniforms.fieldParams.x;
   let dropCount = u32(uniforms.fieldParams.w);
 
-  // W_density has exactly zero support beyond r = h, so any body's
-  // contribution is provably zero outside a radius-h sphere around it —
-  // skip marching entirely outside the union of these analytic bounds.
   var clusterNear = bounds.y;
   var clusterFar = bounds.x;
   var anyBodyHit = false;
@@ -137,7 +129,7 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
   let isoLevel = uniforms.fieldParams.y;
   let minStep = uniforms.stepParams.x;
   let maxStep = uniforms.stepParams.y;
-  let maxTraceSteps = u32(uniforms.stepParams.w);
+  let maxTraceSteps = u32(uniforms.stepParams.z);
 
   var t = clusterNear;
   var previousT = t;
@@ -225,66 +217,3 @@ fn fragmentMain(@builtin(position) fragCoord: vec4<f32>) -> @location(0) vec4<f3
   return vec4<f32>(shadedColor, 1.0);
 }
 `;
-
-// ───── PIPELINE SETUP ─────
-
-export function makeDropRaymarcher(device, presentationFormat) {
-  const uniformBuffer = device.createBuffer({
-    size: UNIFORM_BUFFER_SIZE,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-
-  const bindGroupLayout = device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
-    ],
-  });
-
-  const shaderModule = device.createShaderModule({ code: SHADER_SOURCE });
-  const pipeline = device.createRenderPipeline({
-    layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-    vertex: { module: shaderModule, entryPoint: 'vertexMain' },
-    fragment: { module: shaderModule, entryPoint: 'fragmentMain', targets: [{ format: presentationFormat }] },
-    primitive: { topology: 'triangle-list' },
-  });
-
-  return { device, uniformBuffer, bindGroupLayout, pipeline };
-}
-
-// ───── UNIFORMS & RENDER PASS ─────
-
-export function writeRaymarchUniforms(raymarcher, view) {
-  const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
-  data.set([...view.cameraRight, 0], 0);
-  data.set([...view.cameraUp, 0], 4);
-  data.set([...view.cameraForward, 0], 8);
-  data.set([...view.cameraEye, 0], 12);
-  data.set([view.width, view.height, view.aspectRatio, view.focalLength], 16);
-  data.set([...view.traceHalfExtents, view.maxRayDistance], 20);
-  data.set([view.h, view.isoLevel, view.fluidDensity, view.dropCount], 24);
-  data.set([view.minStep, view.maxStep, view.surfaceEpsilon, view.maxTraceSteps], 28);
-  data.set([...view.backgroundColor, view.gradientMagnitudeMax], 32);
-  data.set([view.noiseScale, view.noiseSpeed, view.noiseOctaves, view.animationTime], 36);
-  raymarcher.device.queue.writeBuffer(raymarcher.uniformBuffer, 0, data);
-}
-
-export function makeRaymarchBindGroup(raymarcher, dropBuffer) {
-  return raymarcher.device.createBindGroup({
-    layout: raymarcher.bindGroupLayout,
-    entries: [
-      { binding: 0, resource: { buffer: raymarcher.uniformBuffer } },
-      { binding: 1, resource: { buffer: dropBuffer } },
-    ],
-  });
-}
-
-export function renderRaymarchPass(raymarcher, commandEncoder, colorTextureView, bindGroup) {
-  const pass = commandEncoder.beginRenderPass({
-    colorAttachments: [{ view: colorTextureView, loadOp: 'clear', storeOp: 'store' }],
-  });
-  pass.setPipeline(raymarcher.pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.draw(3);
-  pass.end();
-}

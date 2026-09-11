@@ -26,7 +26,7 @@ jobs:
         run: |
           mkdir _site
           cp index.html main.js _site/
-          cp -r core rendering simulation parameters _site/
+          cp -r src shaders shaderChunks _site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

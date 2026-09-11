@@ -4,10 +4,13 @@ import {
   computeSmoothingRadiusFromLineSpan,
   makeDropRecord,
   packDropRecords,
-} from '../../simulation/dropState.js';
+  initializePairState,
+  makePairStateRecord,
+  packPairStateRecords,
+} from '../../src/state.js';
 
-// regression: h derived from spacing (§2.5), not hardcoded — fixed h made
-// maxStep tiny, wasting the full step budget on missed rays
+// ───── DROP STATE ─────
+
 describe('computeSmoothingRadiusFromLineSpan', () => {
   it('matches spacing / 0.6 for the default ratio', () => {
     const ballCount = 6;
@@ -115,7 +118,6 @@ describe('packDropRecords', () => {
     const packed = packDropRecords(drops);
 
     expect(packed).toHaveLength(16);
-    // float32 rounding, not exact
     expect(packed[3]).toBeCloseTo(0.1);
     expect(packed[11]).toBeCloseTo(0.2);
   });
@@ -126,5 +128,57 @@ describe('packDropRecords', () => {
     const packed = packDropRecords([drop]);
 
     expect(packed[7]).toBeCloseTo(5);
+  });
+});
+
+// ───── PAIR STATE ─────
+
+describe('initializePairState', () => {
+  it('seeds a resting pair as ATTACHED (phaseCode 0), muAttached at tNow', () => {
+    const state = initializePairState({ tNow: 5 });
+
+    expect(state.phaseCode).toBe(0);
+    expect(state.muAttached).toBe(5);
+  });
+
+  it('seeds a resting pair with muGrowing/muFalling as never-triggered sentinels, not a pre-computed gap', () => {
+    const state = initializePairState({ tNow: 5 });
+
+    expect(state.muGrowing).toBeLessThan(-1e6);
+    expect(state.muFalling).toBeLessThan(-1e6);
+  });
+
+  it('seeds a pre-activated pair as GROWING (phaseCode 1), muGrowing at tNow', () => {
+    const state = initializePairState({ tNow: 5, startGrowing: true });
+
+    expect(state.phaseCode).toBe(1);
+    expect(state.muGrowing).toBe(5);
+  });
+
+  it('seeds a pre-activated pair with muAttached/muFalling as never-triggered sentinels', () => {
+    const state = initializePairState({ tNow: 5, startGrowing: true });
+
+    expect(state.muAttached).toBeLessThan(-1e6);
+    expect(state.muFalling).toBeLessThan(-1e6);
+  });
+});
+
+describe('makePairStateRecord / packPairStateRecords', () => {
+  it('packs phase code and the three mu values in order', () => {
+    const record = makePairStateRecord({ phaseCode: 1, muAttached: 1, muGrowing: 2, muFalling: 3 });
+
+    expect(record).toEqual([1, 1, 2, 3]);
+  });
+
+  it('flattens multiple records into one Float32Array', () => {
+    const packed = packPairStateRecords([
+      { phaseCode: 0, muAttached: 0, muGrowing: 1, muFalling: -1e9 },
+      { phaseCode: 1, muAttached: -1, muGrowing: 0, muFalling: -1e9 },
+    ]);
+
+    expect(packed).toBeInstanceOf(Float32Array);
+    expect(packed.length).toBe(8);
+    expect(packed[0]).toBe(0);
+    expect(packed[4]).toBe(1);
   });
 });

@@ -1,89 +1,61 @@
-const BLOOM_DOWNSAMPLE = 2;
-export const MAIN_TEXTURE_FORMAT = 'rgba16float';
+import { SHADER_SOURCE as BLOOM_SHADER_SOURCE } from '../shaders/bloomShader.js';
 
-const UNIFORM_BUFFER_SIZE = 2 * 16;
+// ───── GRAPHICS CONTEXT (device, canvas, presentation format) ─────
 
-// ───── WGSL SHADER ─────
-
-export const SHADER_SOURCE = /* wgsl */ `
-struct PostProcessUniforms {
-  blurDirection: vec4<f32>,
-  thresholdIntensityExposure: vec4<f32>,
-}
-
-struct VertexOutput {
-  @builtin(position) position: vec4<f32>,
-  @location(0) uv: vec2<f32>,
-}
-
-@group(0) @binding(0) var<uniform> uniforms: PostProcessUniforms;
-@group(0) @binding(1) var textureSampler: sampler;
-@group(0) @binding(2) var sourceTexture: texture_2d<f32>;
-@group(0) @binding(3) var bloomTexture: texture_2d<f32>;
-
-@vertex
-fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-  var positions = array<vec2<f32>, 3>(
-    vec2<f32>(-1.0, -1.0),
-    vec2<f32>(3.0, -1.0),
-    vec2<f32>(-1.0, 3.0),
-  );
-  var out: VertexOutput;
-  let position = positions[vertexIndex];
-  out.position = vec4<f32>(position, 0.0, 1.0);
-  out.uv = vec2<f32>(position.x * 0.5 + 0.5, 0.5 - position.y * 0.5);
-  return out;
-}
-
-// ───── BRIGHT-PASS EXTRACTION (PLAN.md §1.2: B(p) = max(C(p) - threshold, 0)) ─────
-
-@fragment
-fn fragmentExtract(in: VertexOutput) -> @location(0) vec4<f32> {
-  let threshold = uniforms.thresholdIntensityExposure.x;
-  let color = textureSample(sourceTexture, textureSampler, in.uv).rgb;
-  let bright = max(color - vec3<f32>(threshold), vec3<f32>(0.0));
-  return vec4<f32>(bright, 1.0);
-}
-
-// ───── SEPARABLE GAUSSIAN BLUR (9-tap, run once per direction) ─────
-
-@fragment
-fn fragmentBlur(in: VertexOutput) -> @location(0) vec4<f32> {
-  let texelSize = 1.0 / vec2<f32>(textureDimensions(sourceTexture));
-  let step = uniforms.blurDirection.xy * texelSize;
-  var sum = vec4<f32>(0.0);
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * -4.0) * 0.0162;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * -3.0) * 0.0540;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * -2.0) * 0.1216;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * -1.0) * 0.1945;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv) * 0.2270;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * 1.0) * 0.1945;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * 2.0) * 0.1216;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * 3.0) * 0.0540;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * 4.0) * 0.0162;
-  return sum;
-}
-
-// ───── COMPOSITE (PLAN.md §1.2: C' = (C + I*B)*E, T = C'/(1+C'), background bypass on alpha) ─────
-
-@fragment
-fn fragmentComposite(in: VertexOutput) -> @location(0) vec4<f32> {
-  let mainSample = textureSample(sourceTexture, textureSampler, in.uv);
-  let bloom = textureSample(bloomTexture, textureSampler, in.uv).rgb;
-
-  if (mainSample.a < 0.5) {
-    return vec4<f32>(mainSample.rgb, 1.0);
+export async function initializeGraphicsContext(canvas) {
+  if (!navigator.gpu) {
+    throw new Error('gpuSetup: WebGPU is not available in this browser');
   }
 
-  let intensity = uniforms.thresholdIntensityExposure.y;
-  let exposure = uniforms.thresholdIntensityExposure.z;
-  let combined = (mainSample.rgb + intensity * bloom) * exposure;
-  let tonemapped = combined / (vec3<f32>(1.0) + combined);
-  return vec4<f32>(tonemapped, 1.0);
-}
-`;
+  const adapter = await navigator.gpu.requestAdapter();
+  if (!adapter) {
+    throw new Error('gpuSetup: no WebGPU adapter available (GPU/driver not supported, or WebGPU disabled in this browser)');
+  }
+  const device = await adapter.requestDevice();
+  const canvasContext = canvas.getContext('webgpu');
+  const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
 
-// ───── PIPELINE SETUP ─────
+  function _configure() {
+    const RESOLUTION_SCALE = 0.7;
+    const pixelRatio = Math.min(window.devicePixelRatio, RESOLUTION_SCALE);
+    canvas.width = Math.max(1, Math.floor(canvas.clientWidth * pixelRatio));
+    canvas.height = Math.max(1, Math.floor(canvas.clientHeight * pixelRatio));
+    canvasContext.configure({ device, format: presentationFormat, alphaMode: 'opaque' });
+  }
+
+  _configure();
+  new ResizeObserver(_configure).observe(canvas);
+
+  return { device, canvas, canvasContext, presentationFormat };
+}
+
+// ───── RESOURCE REGISTRY ─────
+
+export function makeResourceRegistry(device) {
+  return {
+    device,
+    buffers: new Map(),
+  };
+}
+
+export function registerBuffer(registry, name, descriptor) {
+  const buffer = registry.device.createBuffer(descriptor);
+  registry.buffers.set(name, buffer);
+  return buffer;
+}
+
+export function getBuffer(registry, name) {
+  if (!registry.buffers.has(name)) {
+    throw new Error(`gpuSetup: no buffer registered under "${name}"`);
+  }
+  return registry.buffers.get(name);
+}
+
+// ───── BLOOM SETUP ─────
+
+const BLOOM_DOWNSAMPLE = 2;
+export const MAIN_TEXTURE_FORMAT = 'rgba16float';
+const UNIFORM_BUFFER_SIZE = 2 * 16;
 
 function _makeTexture(device, width, height) {
   return device.createTexture({
@@ -116,7 +88,7 @@ export function makePostProcessor(device, canvasFormat) {
     ],
   });
 
-  const shaderModule = device.createShaderModule({ code: SHADER_SOURCE });
+  const shaderModule = device.createShaderModule({ code: BLOOM_SHADER_SOURCE });
   function _makePipeline(fragmentEntryPoint, bindGroupLayout, targetFormat) {
     return device.createRenderPipeline({
       layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
@@ -200,9 +172,7 @@ export function getMainTextureView(postProcessor) {
   return postProcessor.mainTexture.createView();
 }
 
-// ───── UNIFORMS & RENDER PASSES ─────
-
-function _writeUniforms(postProcessor, { blurDirection, threshold, intensity, exposure }) {
+function _writeBloomUniforms(postProcessor, { blurDirection, threshold, intensity, exposure }) {
   const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
   data.set([...blurDirection, 0, 0], 0);
   data.set([threshold, intensity, exposure, 0], 4);
@@ -219,14 +189,22 @@ function _drawFullscreenPass(commandEncoder, pipeline, bindGroup, targetView) {
   pass.end();
 }
 
-export function runPostProcessPass(postProcessor, commandEncoder, canvasTextureView, { threshold, intensity, exposure }) {
-  _writeUniforms(postProcessor, { blurDirection: [0, 0], threshold, intensity, exposure });
+const DEFAULT_BLOOM_THRESHOLD = 0.2;
+const DEFAULT_BLOOM_INTENSITY = 1.1;
+const DEFAULT_EXPOSURE = 1.5;
+
+export function runPostProcessPass(postProcessor, commandEncoder, canvasTextureView, {
+  threshold = DEFAULT_BLOOM_THRESHOLD,
+  intensity = DEFAULT_BLOOM_INTENSITY,
+  exposure = DEFAULT_EXPOSURE,
+} = {}) {
+  _writeBloomUniforms(postProcessor, { blurDirection: [0, 0], threshold, intensity, exposure });
   _drawFullscreenPass(commandEncoder, postProcessor.extractPipeline, postProcessor.extractBindGroup, postProcessor.extractTexture.createView());
 
-  _writeUniforms(postProcessor, { blurDirection: [1, 0], threshold, intensity, exposure });
+  _writeBloomUniforms(postProcessor, { blurDirection: [1, 0], threshold, intensity, exposure });
   _drawFullscreenPass(commandEncoder, postProcessor.blurPipeline, postProcessor.blurHBindGroup, postProcessor.blurATexture.createView());
 
-  _writeUniforms(postProcessor, { blurDirection: [0, 1], threshold, intensity, exposure });
+  _writeBloomUniforms(postProcessor, { blurDirection: [0, 1], threshold, intensity, exposure });
   _drawFullscreenPass(commandEncoder, postProcessor.blurPipeline, postProcessor.blurVBindGroup, postProcessor.blurBTexture.createView());
 
   _drawFullscreenPass(commandEncoder, postProcessor.compositePipeline, postProcessor.compositeBindGroup, canvasTextureView);
