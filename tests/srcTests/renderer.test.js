@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeCameraBasisVectors, computeLineSpanWidth } from '../../rendering/cameraProjection.js';
+import { computeCameraBasisVectors, computeLineSpanWidth } from '../../src/renderer.js';
 
 describe('computeCameraBasisVectors', () => {
   it('produces an orthonormal right/up/forward basis for the default frontal camera', () => {
@@ -9,7 +9,6 @@ describe('computeCameraBasisVectors', () => {
       [0, 1, 0],
     );
 
-    // frontal: eye/target share Y, view dir pure -Z
     expect(forwardAxis).toEqual([0, 0, 1]);
     expect(rightAxis).toEqual([1, 0, 0]);
     expect(trueUpAxis).toEqual([0, 1, 0]);

@@ -1,14 +1,10 @@
-import { getDensityFieldShaderChunk } from '../rendering/densityField.js';
-import { getDripPhysicsShaderChunk } from './dripPhysics.js';
-import { getDripPhaseSystemShaderChunk } from './dripPhaseSystem.js';
-
-const UNIFORM_BUFFER_SIZE = 2 * 16;
-
-// ───── WGSL SHADER ─────
+import { getParticleMassChunk } from '../shaderChunks/shapeChunk.js';
+import { getSimulationChunk } from '../shaderChunks/simulationChunk.js';
+import { getPhaseChunk } from '../shaderChunks/phaseChunk.js';
 
 export const SHADER_SOURCE = /* wgsl */ `
-const GRAVITY: f32 = 1.8;
-const GAMMA: f32 = 0.3;
+const GRAVITY: f32 = 5.0;
+const GAMMA: f32 = 2.0;
 const RESPAWN_OVERSHOOT: f32 = 1.5;
 
 struct DripUniforms {
@@ -27,9 +23,9 @@ struct Drop {
 @group(0) @binding(3) var<storage, read_write> nextDrops: array<Drop>;
 @group(0) @binding(4) var<storage, read_write> nextPairState: array<PairState>;
 
-${getDensityFieldShaderChunk()}
-${getDripPhysicsShaderChunk()}
-${getDripPhaseSystemShaderChunk()}
+${getParticleMassChunk()}
+${getSimulationChunk()}
+${getPhaseChunk()}
 
 @compute @workgroup_size(1)
 fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
@@ -61,12 +57,12 @@ fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
   let pair = currentPairState[pairIndex];
   let anchorPosition = currentDrops[anchorIndex].positionAndRadius.xyz;
 
-  // ───── DISPATCHER, WEIGHTS, BLENDING (the only phase-aware reads) ─────
+  // ───── DISPATCHER, WEIGHTS, BLENDING ─────
   let weights = computePhaseWeights(pair, tNow, 1e-6);
   let gravity = blendPhaseValue(weights, getAttachedGravity(), getGrowingGravity(), getFallingGravity());
   let drag = blendPhaseValue(weights, getAttachedDrag(), getGrowingDrag(), getFallingDrag());
 
-  // ───── FORCES (unconditional — no phase filtering, natural coalescing) ─────
+  // ───── FORCES ─────
   var force = vec3<f32>(0.0, 0.0, 0.0);
   let myPosition = currentDrops[i].positionAndRadius.xyz;
   let myMass = computeParticleMass(currentDrops[i].positionAndRadius.w, fluidDensity);
@@ -103,58 +99,3 @@ fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
   nextPairState[pairIndex] = nextPair;
 }
 `;
-
-// ───── PIPELINE SETUP ─────
-
-export function makeDripComputePass(device) {
-  const uniformBuffer = device.createBuffer({
-    size: UNIFORM_BUFFER_SIZE,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-
-  const bindGroupLayout = device.createBindGroupLayout({
-    entries: [
-      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
-      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-      { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
-    ],
-  });
-
-  const shaderModule = device.createShaderModule({ code: SHADER_SOURCE });
-  const pipeline = device.createComputePipeline({
-    layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-    compute: { module: shaderModule, entryPoint: 'computeMain' },
-  });
-
-  return { device, uniformBuffer, bindGroupLayout, pipeline };
-}
-
-export function writeDripPhysicsUniforms(computePass, view) {
-  const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
-  data.set([view.h, view.tNow, view.dt, view.fluidDensity], 0);
-  data.set([view.respawnY, view.baseRadius, view.dropCount, view.anchorBaseRadius], 4);
-  computePass.device.queue.writeBuffer(computePass.uniformBuffer, 0, data);
-}
-
-export function makeDripComputeBindGroup(computePass, currentDropBuffer, currentPairStateBuffer, nextDropBuffer, nextPairStateBuffer) {
-  return computePass.device.createBindGroup({
-    layout: computePass.bindGroupLayout,
-    entries: [
-      { binding: 0, resource: { buffer: computePass.uniformBuffer } },
-      { binding: 1, resource: { buffer: currentDropBuffer } },
-      { binding: 2, resource: { buffer: currentPairStateBuffer } },
-      { binding: 3, resource: { buffer: nextDropBuffer } },
-      { binding: 4, resource: { buffer: nextPairStateBuffer } },
-    ],
-  });
-}
-
-export function runDripComputePass(computePass, commandEncoder, bindGroup, dropCount) {
-  const pass = commandEncoder.beginComputePass();
-  pass.setPipeline(computePass.pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(dropCount);
-  pass.end();
-}

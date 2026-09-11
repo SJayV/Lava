@@ -1,56 +1,8 @@
-import { registerBuffer, getBuffer } from '../core/resourceRegistry.js';
-import { getTurbulenceNoiseShaderChunk } from '../rendering/noise.js';
+import { getNoiseChunk } from './noiseChunk.js';
 
-const FLOATS_PER_PAIR_STATE = 4;
-const NEVER_TRIGGERED_MU = -1e9;
-
-export function initializePairState({ tNow = 0, startGrowing = false }) {
-  if (startGrowing) {
-    return { phaseCode: 1, muAttached: NEVER_TRIGGERED_MU, muGrowing: tNow, muFalling: NEVER_TRIGGERED_MU };
-  }
-  return { phaseCode: 0, muAttached: tNow, muGrowing: NEVER_TRIGGERED_MU, muFalling: NEVER_TRIGGERED_MU };
-}
-
-export function makePairStateRecord({ phaseCode, muAttached, muGrowing, muFalling }) {
-  return [phaseCode, muAttached, muGrowing, muFalling];
-}
-
-export function packPairStateRecords(records) {
-  const packed = new Float32Array(records.length * FLOATS_PER_PAIR_STATE);
-  records.forEach((record, index) => {
-    packed.set(makePairStateRecord(record), index * FLOATS_PER_PAIR_STATE);
-  });
-  return packed;
-}
-
-// ───── GPU BUFFER WRAPPER ─────
-
-export function makePairState(device, registry, pairCount, initialPairStates) {
-  const size = pairCount * FLOATS_PER_PAIR_STATE * 4;
-  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  registerBuffer(registry, 'pairStateA', { size, usage });
-  registerBuffer(registry, 'pairStateB', { size, usage });
-  device.queue.writeBuffer(getBuffer(registry, 'pairStateA'), 0, packPairStateRecords(initialPairStates));
-  return { registry, pairCount, activeIndex: 0 };
-}
-
-export function getCurrentPairStateBuffer(pairState) {
-  return getBuffer(pairState.registry, pairState.activeIndex === 0 ? 'pairStateA' : 'pairStateB');
-}
-
-export function getNextPairStateBuffer(pairState) {
-  return getBuffer(pairState.registry, pairState.activeIndex === 0 ? 'pairStateB' : 'pairStateA');
-}
-
-export function swapPairState(pairState) {
-  pairState.activeIndex = 1 - pairState.activeIndex;
-}
-
-// ───── WGSL CHUNK ─────
-
-export function getDripPhaseSystemShaderChunk() {
+export function getPhaseChunk() {
   return /* wgsl */ `
-    ${getTurbulenceNoiseShaderChunk()}
+    ${getNoiseChunk()}
 
     // ───── CONSTANTS ─────
 
@@ -77,7 +29,7 @@ export function getDripPhaseSystemShaderChunk() {
       wFalling: f32,
     }
 
-    // ───── PAIRSTATE ACCESS (unpack once, not per call site) ─────
+    // ───── PAIRSTATE ACCESS ─────
 
     fn getPhaseCode(pair: PairState) -> f32 {
       return pair.phaseCodeAndMus.x;
@@ -120,7 +72,7 @@ export function getDripPhaseSystemShaderChunk() {
       return valueAttached * weights.wAttached + valueGrowing * weights.wGrowing + valueFalling * weights.wFalling;
     }
 
-    // ───── PER-PHASE PARAMETER VALUES (one function per phase — mirrors _clusterVelocity/_metaballVelocity/_burstVelocity; swap any one body for a derived formula later without touching call sites) ─────
+    // ───── PER-PHASE PARAMETER VALUES ─────
 
     fn getAttachedGravity() -> f32 {
       return 0.0;
@@ -146,7 +98,7 @@ export function getDripPhaseSystemShaderChunk() {
       return BASE_DRAG * FALLING_DRAG_FACTOR;
     }
 
-    // ───── SCHEDULER: EXIT PREDICATES + ACTIVATION (cause before effect — a phase's mu is only ever written from inside its own activate<Phase> call, itself only ever reached through the matching <phase>ShouldExit check) ─────
+    // ───── SCHEDULER: EXIT PREDICATES + ACTIVATION ─────
 
     fn attachedShouldExit(pair: PairState, tNow: f32, pairIndex: u32) -> bool {
       let muAttached = getMus(pair).x;

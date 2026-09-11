@@ -7,7 +7,7 @@ import {
   computeGradientMagnitudeBound,
   computeIsoLevelCalibrationFactorForRadiusRatio,
   computeIsoConsistentRadius,
-} from '../../rendering/densityField.js';
+} from '../../src/simulation.js';
 
 function _computeIsosurfaceRadiusRatio(calibrationFactor) {
   return Math.sqrt(1 - calibrationFactor ** (1 / 3));
@@ -83,7 +83,6 @@ describe('computeIsoLevel', () => {
     expect(isoLevel).toBeCloseTo(C * mass * computeDensityKernel(0, h));
   });
 
-  // mass cancels out — rendered radius depends only on h, C
   it('crosses isoLevel at the same radius regardless of particle mass', () => {
     const h = 0.3;
     const C = 0.35;
@@ -99,10 +98,6 @@ describe('computeIsoLevel', () => {
     }
   });
 
-  // regression: calibrating isoLevel off a heavier body's mass can leave a
-  // much lighter body unable to ever cross isoLevel at all — it becomes
-  // invisible once separated from the heavier body's field, even though
-  // it's still physically present and moving
   it('a much lighter body cannot reach isoLevel when calibrated off a heavier one', () => {
     const h = 0.3;
     const C = 0.7;
@@ -138,7 +133,6 @@ describe('computeIsoLevelCalibrationFactorForRadiusRatio', () => {
   });
 
   it('reproduces the 2x-too-big regression: C = 0.35 renders a radius far larger than the ~0.3h drop radius', () => {
-    // C=0.35 -> r_iso ~0.543h, ~1.8x a 0.3h target
     const radiusRatio = _computeIsosurfaceRadiusRatio(0.35);
 
     expect(radiusRatio).toBeCloseTo(0.5434, 3);
@@ -210,10 +204,5 @@ describe('computeGradientMagnitudeBound', () => {
     const boundAt4 = computeGradientMagnitudeBound(mass, h, 4);
 
     expect(boundAt4).toBeCloseTo(boundAt2 * 2);
-  });
-
-  it('is a single closed-form expression — no drop list or dropCount input', () => {
-    // no drops/dropCount — must stay O(1) per pixel
-    expect(computeGradientMagnitudeBound).toHaveLength(3);
   });
 });

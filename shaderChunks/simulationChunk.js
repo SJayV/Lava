@@ -1,8 +1,6 @@
 const COHESION_NORMALIZATION = 32 / Math.PI;
 
-// ───── WGSL CHUNK ─────
-
-export function getDripPhysicsShaderChunk() {
+export function getSimulationChunk() {
   return /* wgsl */ `
     fn computeCohesionKernel(distance: f32, smoothingRadius: f32) -> f32 {
       if (distance <= 0.0 || distance > smoothingRadius) {

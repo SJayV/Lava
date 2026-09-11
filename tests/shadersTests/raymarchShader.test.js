@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { SHADER_SOURCE } from '../../rendering/dropRaymarcher.js';
+import { SHADER_SOURCE } from '../../shaders/raymarchShader.js';
 
 
 function _extractFunctionBody(source, functionName) {
@@ -29,13 +29,11 @@ describe('traceDensityIsosurface step size', () => {
   });
 
   it('does not evaluate the density field via offset finite differences per step', () => {
-    // old bug: 3x computeDensityField(position + ...) per step
     expect(traceBody).not.toMatch(/computeDensityField\(position \+/);
   });
 
   it('evaluates computeDensityField at most twice per step: once for density, once for bisection', () => {
     const perStepCalls = traceBody.match(/computeDensityField\(/g) ?? [];
-    // 1 initial + 1 per step + 1 bisection, never the 4x blowup
     expect(perStepCalls.length).toBeLessThanOrEqual(3);
   });
 });
@@ -57,9 +55,6 @@ describe('traceDensityIsosurface sphere-bound acceleration', () => {
   });
 });
 
-// only bodies whose ray-sphere test actually hit can contribute nonzero
-// density along this ray (W_density has zero support beyond r=h) — mask
-// them once and skip the rest on every subsequent step, not just the range
 describe('traceDensityIsosurface relevant-body masking', () => {
   const traceBody = _extractFunctionBody(SHADER_SOURCE, 'traceDensityIsosurface');
   const densityBody = _extractFunctionBody(SHADER_SOURCE, 'computeDensityField');
@@ -138,7 +133,6 @@ describe('computeFieldGradientNormal', () => {
     const normalBody = _extractFunctionBody(SHADER_SOURCE, 'computeFieldGradientNormal');
     const calls = normalBody.match(/computeDensityField\(/g) ?? [];
 
-    // 3 axes x 2 samples = 6, intentional (§1.3)
     expect(calls).toHaveLength(6);
   });
 });
