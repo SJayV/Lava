@@ -110,14 +110,14 @@ $$\mathcal{N}(\mathbf{x},t) = \frac{\sum_{k=0}^{K-1} a^k\, n\big(2^k(\mathbf{x} 
 **Temperature ramp:** cooled, molten, white-hot
 - white-hot deliberately past full brightness, feeding the bloom pass
 
-$$C_{\text{temp}}(u) = \operatorname{mix}\!\Big(\operatorname{mix}(C_{\text{cool}}, C_{\text{molten}}, \operatorname{smoothstep}(0,0.6,u)),\ C_{\text{hot}},\ \operatorname{smoothstep}(0.6,1,u)\Big)$$
+$$C_{\text{temp}}(u) = \text{mix}\!\Big(\text{mix}(C_{\text{cool}}, C_{\text{molten}}, \text{smoothstep}(0,0.6,u)),\ C_{\text{hot}},\ \text{smoothstep}(0.6,1,u)\Big)$$
 
 **Shading:** single directional light plus a Fresnel rim term
 - ramp clamped for the lit term
 - overshoot kept as a separate emissive term, feeding bloom independently
 
-$$F(\mathbf v,\mathbf n) = \big(1-\operatorname{clamp}(\langle \mathbf v,\mathbf n\rangle,0,1)\big)^4
-\\ C_{\text{shaded}} = \min(C_{\text{temp}},1)\cdot\operatorname{clamp}\big(\text{ambient} + \langle \mathbf n,\mathbf l\rangle + F,\ 0,\ 1\big) + \max(C_{\text{temp}}-1,\ 0)$$
+$$F(\mathbf v,\mathbf n) = \big(1-\text{clamp}(\langle \mathbf v,\mathbf n\rangle,0,1)\big)^4
+\\ C_{\text{shaded}} = \min(C_{\text{temp}},1)\cdot\text{clamp}\big(\text{ambient} + \langle \mathbf n,\mathbf l\rangle + F,\ 0,\ 1\big) + \max(C_{\text{temp}}-1,\ 0)$$
 
 ### 1.7 Camera
 
