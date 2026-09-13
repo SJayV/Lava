@@ -1,6 +1,7 @@
 import { getDensityKernelChunk, getParticleMassChunk } from '../shaderChunks/shapeChunk.js';
 import { getNoiseChunk } from '../shaderChunks/noiseChunk.js';
 import { getColorChunk } from '../shaderChunks/colorChunk.js';
+import { FULLSCREEN_TRIANGLE_POSITION_CHUNK } from '../src/gpuSetup.js';
 
 export const SHADER_SOURCE = /* wgsl */ `
 struct RaymarchUniforms {
@@ -171,14 +172,11 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
   return result;
 }
 
+${FULLSCREEN_TRIANGLE_POSITION_CHUNK}
+
 @vertex
 fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> @builtin(position) vec4<f32> {
-  var positions = array<vec2<f32>, 3>(
-    vec2<f32>(-1.0, -1.0),
-    vec2<f32>(3.0, -1.0),
-    vec2<f32>(-1.0, 3.0),
-  );
-  return vec4<f32>(positions[vertexIndex], 0.0, 1.0);
+  return vec4<f32>(getFullscreenTrianglePosition(vertexIndex), 0.0, 1.0);
 }
 
 @fragment

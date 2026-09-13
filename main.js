@@ -1,11 +1,80 @@
-import { initializeGraphicsContext, makeResourceRegistry, getBuffer, MAIN_TEXTURE_FORMAT, makePostProcessor, resizePostProcessorIfNeeded, getMainTextureView, runPostProcessPass } from './src/gpuSetup.js';
+import { initializeGraphicsContext, makeResourceRegistry, MAIN_TEXTURE_FORMAT, makePostProcessor, resizePostProcessorIfNeeded, getMainTextureView, runPostProcessPass } from './src/gpuSetup.js';
+import { SHADER_SOURCE as BLOOM_SHADER_SOURCE } from './shaders/bloomShader.js';
 import { makeParameterStore, getParameterValue } from './src/parameters.js';
 import { PAIR_COUNT, DROP_COUNT, FLUID_DENSITY, RESPAWN_Y } from './src/constants.js';
 import { CAMERA_EYE, CAMERA_TARGET, CAMERA_UP, FOV_VERTICAL, TRACE_BOUND_MARGIN_IN_H, computeCameraBasisVectors, computeLineSpanWidth, makeDropRaymarcher, writeRaymarchUniforms, makeRaymarchBindGroup, renderRaymarchPass } from './src/renderer.js';
-import { N_LOCAL, ANCHOR_RADIUS_TO_H_RATIO, DRIP_RADIUS_TO_H_RATIO, ISO_LEVEL_C, computeParticleMass, computeIsoLevel, computeIsoConsistentRadius, computeGradientMagnitudeBound, makeDripComputePass, writeDripPhysicsUniforms, makeDripComputeBindGroup, runDripComputePass } from './src/simulation.js';
-import { LINE_Y, computeSmoothingRadiusFromLineSpan, computeLineSeedPositions, makeDropRecord, packDropRecords, makeDropState, getCurrentDropBuffer, swapDropState, initializePairState, makePairState, swapPairState } from './src/state.js';
+import { N_LOCAL, ANCHOR_RADIUS_TO_H_RATIO, DRIP_RADIUS_TO_H_RATIO, computeCalibration, makeDripComputePass, writeDripPhysicsUniforms, makeDripComputeBindGroup, runDripComputePass } from './src/simulation.js';
+import { LINE_Y, computeSmoothingRadiusFromLineSpan, computeLineSeedPositions, makeDropRecord, packDropRecords, makeDropState, getCurrentDropBuffer, getDropBufferPair, swapDropState, initializePairState, makePairState, getPairStateBufferPair, swapPairState } from './src/state.js';
 
-const ACTIVE_PAIR_INDEX = 3;
+// ───── CONSTANTS ─────
+
+const FIXED_TIMESTEP = 1 / 120;
+const MAXIMUM_SUBSTEPS_PER_FRAME = 8;
+
+const MIN_STEP_TO_H_RATIO = 0.02;
+const MAX_STEP_TO_H_RATIO = 0.5;
+const BLACK = [0.02, 0.02, 0.03];
+
+// ───── HELPER FUNCTIONS - WORLD SETUP ─────
+
+function computeWorldSetup(canvas) {
+  const aspectRatio = canvas.clientWidth / canvas.clientHeight;
+  const eyeDistance = Math.hypot(...CAMERA_EYE.map((v, i) => v - CAMERA_TARGET[i]));
+  const lineSpanWidth = computeLineSpanWidth({ eyeDistance, fovVertical: FOV_VERTICAL, aspectRatio });
+  const cameraBasis = computeCameraBasisVectors(CAMERA_EYE, CAMERA_TARGET, CAMERA_UP);
+  const focalLength = 1 / Math.tan(FOV_VERTICAL / 2);
+  const h = computeSmoothingRadiusFromLineSpan({ ballCount: PAIR_COUNT, lineSpanWidth });
+  return { aspectRatio, lineSpanWidth, cameraBasis, focalLength, h };
+}
+
+function computeTraceBounds({ lineSpanWidth, h }) {
+  return {
+    maxRayDistance: lineSpanWidth + TRACE_BOUND_MARGIN_IN_H * h,
+    traceHalfExtents: [
+      lineSpanWidth / 2 + TRACE_BOUND_MARGIN_IN_H * h,
+      TRACE_BOUND_MARGIN_IN_H * h + Math.abs(RESPAWN_Y),
+      TRACE_BOUND_MARGIN_IN_H * h,
+    ],
+  };
+}
+
+// ───── HELPER FUNCTIONS - DROP/PAIR SEEDING ─────
+
+function seedDropState(device, registry, { lineSpanWidth, dripRadius, anchorRadius }) {
+  const seedPositions = computeLineSeedPositions({ ballCount: PAIR_COUNT, lineSpanWidth, lineY: LINE_Y });
+  const drops = seedPositions.flatMap((position) => [
+    makeDropRecord({ position, radius: anchorRadius }),
+    makeDropRecord({ position, radius: dripRadius }),
+  ]);
+
+  const dropState = makeDropState(registry, DROP_COUNT);
+  device.queue.writeBuffer(getCurrentDropBuffer(dropState), 0, packDropRecords(drops));
+  return dropState;
+}
+
+function seedPairState(device, registry) {
+  const initialPairStates = Array.from({ length: PAIR_COUNT }, () => initializePairState({ tNow: 0 }));
+  return makePairState(device, registry, PAIR_COUNT, initialPairStates);
+}
+
+// ───── HELPER FUNCTIONS - BIND GROUPS ─────
+
+function makeDripBindGroupsByActiveIndex(computePass, dropState, pairState) {
+  const [dropStateA, dropStateB] = getDropBufferPair(dropState);
+  const [pairStateA, pairStateB] = getPairStateBufferPair(pairState);
+  return [
+    makeDripComputeBindGroup(computePass, dropStateA, pairStateA, dropStateB, pairStateB),
+    makeDripComputeBindGroup(computePass, dropStateB, pairStateB, dropStateA, pairStateA),
+  ];
+}
+
+function makeRaymarchBindGroupsByActiveIndex(raymarcher, dropState) {
+  const [dropStateA, dropStateB] = getDropBufferPair(dropState);
+  return [
+    makeRaymarchBindGroup(raymarcher, dropStateA),
+    makeRaymarchBindGroup(raymarcher, dropStateB),
+  ];
+}
 
 // ───── INITIALIZATION ─────
 
@@ -15,63 +84,25 @@ async function main() {
   const registry = makeResourceRegistry(graphicsContext.device);
   const parameterStore = makeParameterStore({ simulationTimeScale: 1 });
 
-  const aspectRatio = canvas.clientWidth / canvas.clientHeight;
-  const eyeDistance = Math.hypot(...CAMERA_EYE.map((v, i) => v - CAMERA_TARGET[i]));
-  const lineSpanWidth = computeLineSpanWidth({ eyeDistance, fovVertical: FOV_VERTICAL, aspectRatio });
-  const { rightAxis, trueUpAxis, forwardAxis } = computeCameraBasisVectors(CAMERA_EYE, CAMERA_TARGET, CAMERA_UP);
-  const focalLength = 1 / Math.tan(FOV_VERTICAL / 2);
-
-  const H = computeSmoothingRadiusFromLineSpan({ ballCount: PAIR_COUNT, lineSpanWidth });
-  const DRIP_RADIUS = DRIP_RADIUS_TO_H_RATIO * H;
-  const dripMass = computeParticleMass(DRIP_RADIUS, FLUID_DENSITY);
-  const isoLevel = computeIsoLevel(dripMass, H, ISO_LEVEL_C);
-  const ANCHOR_RADIUS = computeIsoConsistentRadius({
-    isoLevel,
-    radiusRatio: ANCHOR_RADIUS_TO_H_RATIO,
-    smoothingRadius: H,
+  const world = computeWorldSetup(canvas);
+  const { dripRadius, anchorRadius, isoLevel, gradientMagnitudeMax } = await computeCalibration(graphicsContext.device, {
+    smoothingRadius: world.h,
+    dripRadiusRatio: DRIP_RADIUS_TO_H_RATIO,
+    anchorRadiusRatio: ANCHOR_RADIUS_TO_H_RATIO,
     fluidDensity: FLUID_DENSITY,
+    localNeighborCount: N_LOCAL,
   });
-  const MAX_RAY_DISTANCE = lineSpanWidth + TRACE_BOUND_MARGIN_IN_H * H;
-  const TRACE_HALF_EXTENTS = [
-    lineSpanWidth / 2 + TRACE_BOUND_MARGIN_IN_H * H,
-    TRACE_BOUND_MARGIN_IN_H * H + Math.abs(RESPAWN_Y),
-    TRACE_BOUND_MARGIN_IN_H * H,
-  ];
+  const traceBounds = computeTraceBounds({ lineSpanWidth: world.lineSpanWidth, h: world.h });
 
-  const seedPositions = computeLineSeedPositions({ ballCount: PAIR_COUNT, lineSpanWidth, lineY: LINE_Y });
-  const drops = seedPositions.flatMap((position) => [
-    makeDropRecord({ position, radius: ANCHOR_RADIUS }),
-    makeDropRecord({ position, radius: DRIP_RADIUS }),
-  ]);
-  const packedDrops = packDropRecords(drops);
-
-  const dropState = makeDropState(registry, DROP_COUNT);
-  graphicsContext.device.queue.writeBuffer(getCurrentDropBuffer(dropState), 0, packedDrops);
-
-  const initialPairStates = Array.from({ length: PAIR_COUNT }, (_, pairIndex) =>
-    initializePairState({ tNow: 0, startGrowing: pairIndex === ACTIVE_PAIR_INDEX }));
-  const pairState = makePairState(graphicsContext.device, registry, PAIR_COUNT, initialPairStates);
+  const dropState = seedDropState(graphicsContext.device, registry, { lineSpanWidth: world.lineSpanWidth, dripRadius, anchorRadius });
+  const pairState = seedPairState(graphicsContext.device, registry);
 
   const raymarcher = makeDropRaymarcher(graphicsContext.device, MAIN_TEXTURE_FORMAT);
-  const postProcessor = makePostProcessor(graphicsContext.device, graphicsContext.presentationFormat);
+  const postProcessor = makePostProcessor(graphicsContext.device, graphicsContext.presentationFormat, BLOOM_SHADER_SOURCE);
   const computePass = makeDripComputePass(graphicsContext.device);
 
-  const dropStateA = getBuffer(registry, 'dropStateA');
-  const dropStateB = getBuffer(registry, 'dropStateB');
-  const pairStateA = getBuffer(registry, 'pairStateA');
-  const pairStateB = getBuffer(registry, 'pairStateB');
-
-  const computeBindGroupsByActiveIndex = [
-    makeDripComputeBindGroup(computePass, dropStateA, pairStateA, dropStateB, pairStateB),
-    makeDripComputeBindGroup(computePass, dropStateB, pairStateB, dropStateA, pairStateA),
-  ];
-  const raymarchBindGroupsByActiveIndex = [
-    makeRaymarchBindGroup(raymarcher, dropStateA),
-    makeRaymarchBindGroup(raymarcher, dropStateB),
-  ];
-
-  const anchorMass = computeParticleMass(ANCHOR_RADIUS, FLUID_DENSITY);
-  const gradientMagnitudeMax = computeGradientMagnitudeBound(anchorMass, H, N_LOCAL);
+  const computeBindGroupsByActiveIndex = makeDripBindGroupsByActiveIndex(computePass, dropState, pairState);
+  const raymarchBindGroupsByActiveIndex = makeRaymarchBindGroupsByActiveIndex(raymarcher, dropState);
 
   let frameCommandEncoder = null;
   let simulationElapsedTime = 0;
@@ -79,13 +110,13 @@ async function main() {
   function updateSimulation(dt) {
     simulationElapsedTime += dt;
     writeDripPhysicsUniforms(computePass, {
-      h: H,
+      h: world.h,
       tNow: simulationElapsedTime,
       dt,
       fluidDensity: FLUID_DENSITY,
       respawnY: RESPAWN_Y,
-      baseRadius: DRIP_RADIUS,
-      anchorBaseRadius: ANCHOR_RADIUS,
+      baseRadius: dripRadius,
+      anchorBaseRadius: anchorRadius,
       dropCount: DROP_COUNT,
     });
 
@@ -98,24 +129,24 @@ async function main() {
 
   function renderFrame() {
     writeRaymarchUniforms(raymarcher, {
-      cameraRight: rightAxis,
-      cameraUp: trueUpAxis,
-      cameraForward: forwardAxis,
+      cameraRight: world.cameraBasis.rightAxis,
+      cameraUp: world.cameraBasis.trueUpAxis,
+      cameraForward: world.cameraBasis.forwardAxis,
       cameraEye: CAMERA_EYE,
       width: canvas.width,
       height: canvas.height,
-      aspectRatio,
-      focalLength,
-      traceHalfExtents: TRACE_HALF_EXTENTS,
-      maxRayDistance: MAX_RAY_DISTANCE,
-      h: H,
+      aspectRatio: world.aspectRatio,
+      focalLength: world.focalLength,
+      traceHalfExtents: traceBounds.traceHalfExtents,
+      maxRayDistance: traceBounds.maxRayDistance,
+      h: world.h,
       isoLevel,
       fluidDensity: FLUID_DENSITY,
       dropCount: DROP_COUNT,
-      minStep: 0.02 * H,
-      maxStep: 0.5 * H,
+      minStep: MIN_STEP_TO_H_RATIO * world.h,
+      maxStep: MAX_STEP_TO_H_RATIO * world.h,
       maxTraceSteps: 20,
-      backgroundColor: [0.02, 0.02, 0.03],
+      backgroundColor: BLACK,
       gradientMagnitudeMax,
       animationTime: performance.now() / 1000,
     });
@@ -139,9 +170,6 @@ async function main() {
   }
 
   // ───── ANIMATION LOOP ─────
-
-  const FIXED_TIMESTEP = 1 / 120;
-  const MAXIMUM_SUBSTEPS_PER_FRAME = 8;
 
   let accumulatedSeconds = 0;
   let lastTimestampMs = null;

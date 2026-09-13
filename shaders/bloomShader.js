@@ -1,3 +1,5 @@
+import { FULLSCREEN_TRIANGLE_POSITION_CHUNK } from '../src/gpuSetup.js';
+
 export const SHADER_SOURCE = /* wgsl */ `
 struct PostProcessUniforms {
   blurDirection: vec4<f32>,
@@ -14,15 +16,12 @@ struct VertexOutput {
 @group(0) @binding(2) var sourceTexture: texture_2d<f32>;
 @group(0) @binding(3) var bloomTexture: texture_2d<f32>;
 
+${FULLSCREEN_TRIANGLE_POSITION_CHUNK}
+
 @vertex
 fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-  var positions = array<vec2<f32>, 3>(
-    vec2<f32>(-1.0, -1.0),
-    vec2<f32>(3.0, -1.0),
-    vec2<f32>(-1.0, 3.0),
-  );
   var out: VertexOutput;
-  let position = positions[vertexIndex];
+  let position = getFullscreenTrianglePosition(vertexIndex);
   out.position = vec4<f32>(position, 0.0, 1.0);
   out.uv = vec2<f32>(position.x * 0.5 + 0.5, 0.5 - position.y * 0.5);
   return out;

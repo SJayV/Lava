@@ -1,4 +1,5 @@
 import { SHADER_SOURCE } from '../shaders/raymarchShader.js';
+import { UNIFORM_BUFFER_SIZE } from './parameters.js';
 
 // ───── CAMERA CONFIGURATION ─────
 
@@ -39,8 +40,6 @@ export function computeLineSpanWidth({ eyeDistance, fovVertical, aspectRatio }) 
 }
 
 // ───── PIPELINE SETUP ─────
-
-const UNIFORM_BUFFER_SIZE = 10 * 16;
 
 export function makeDropRaymarcher(device, presentationFormat) {
   const uniformBuffer = device.createBuffer({

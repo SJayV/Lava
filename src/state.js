@@ -1,5 +1,13 @@
 import { registerBuffer, getBuffer } from './gpuSetup.js';
 
+// ───── HELPER FUNCTIONS - PING-PONG BUFFERS ─────
+
+function makePingPongBuffers(registry, baseName, size) {
+  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+  registerBuffer(registry, `${baseName}A`, { size, usage });
+  registerBuffer(registry, `${baseName}B`, { size, usage });
+}
+
 // ───── DROP STATE ─────
 
 export const LINE_Y = 1.2;
@@ -38,15 +46,16 @@ export function packDropRecords(drops) {
 }
 
 export function makeDropState(registry, dropCount) {
-  const size = dropCount * BYTES_PER_DROP;
-  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  registerBuffer(registry, 'dropStateA', { size, usage });
-  registerBuffer(registry, 'dropStateB', { size, usage });
+  makePingPongBuffers(registry, 'dropState', dropCount * BYTES_PER_DROP);
   return { registry, dropCount, activeIndex: 0 };
 }
 
 export function getCurrentDropBuffer(dropState) {
   return getBuffer(dropState.registry, dropState.activeIndex === 0 ? 'dropStateA' : 'dropStateB');
+}
+
+export function getDropBufferPair(dropState) {
+  return [getBuffer(dropState.registry, 'dropStateA'), getBuffer(dropState.registry, 'dropStateB')];
 }
 
 export function swapDropState(dropState) {
@@ -78,12 +87,13 @@ export function packPairStateRecords(records) {
 }
 
 export function makePairState(device, registry, pairCount, initialPairStates) {
-  const size = pairCount * FLOATS_PER_PAIR_STATE * 4;
-  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  registerBuffer(registry, 'pairStateA', { size, usage });
-  registerBuffer(registry, 'pairStateB', { size, usage });
+  makePingPongBuffers(registry, 'pairState', pairCount * FLOATS_PER_PAIR_STATE * 4);
   device.queue.writeBuffer(getBuffer(registry, 'pairStateA'), 0, packPairStateRecords(initialPairStates));
   return { registry, pairCount, activeIndex: 0 };
+}
+
+export function getPairStateBufferPair(pairState) {
+  return [getBuffer(pairState.registry, 'pairStateA'), getBuffer(pairState.registry, 'pairStateB')];
 }
 
 export function swapPairState(pairState) {

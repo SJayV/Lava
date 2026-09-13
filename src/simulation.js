@@ -1,5 +1,6 @@
-import { POLY6_NORMALIZATION } from '../shaderChunks/shapeChunk.js';
 import { SHADER_SOURCE } from '../shaders/simulationShader.js';
+import { SHADER_SOURCE as CALIBRATION_SHADER_SOURCE } from '../shaders/calibrationShader.js';
+import { UNIFORM_BUFFER_SIZE } from './parameters.js';
 
 // ───── SIZING CONSTANTS ─────
 
@@ -7,50 +8,56 @@ export const N_LOCAL = 4;
 export const ANCHOR_RADIUS_TO_H_RATIO = 0.3;
 export const DRIP_RADIUS_TO_H_RATIO = 0.3;
 
-// ───── PARTICLE / DENSITY-FIELD MATH ─────
+// ───── CALIBRATION PASS ─────
 
-const POLY6_GRADIENT_MAX_COEFFICIENT = 2.7;
+const CALIBRATION_RESULT_SIZE = 16;
 
-export function computeDensityKernel(distance, smoothingRadius) {
-  if (distance < 0 || distance >= smoothingRadius) {
-    return 0;
-  }
-  const term = smoothingRadius ** 2 - distance ** 2;
-  return (POLY6_NORMALIZATION / smoothingRadius ** 9) * term ** 3;
-}
+export async function computeCalibration(device, { smoothingRadius, dripRadiusRatio, anchorRadiusRatio, fluidDensity, localNeighborCount }) {
+  const uniformBuffer = device.createBuffer({ size: UNIFORM_BUFFER_SIZE, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const resultBuffer = device.createBuffer({ size: CALIBRATION_RESULT_SIZE, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+  const stagingBuffer = device.createBuffer({ size: CALIBRATION_RESULT_SIZE, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
 
-export function computeParticleMass(radius, fluidDensity) {
-  return (4 / 3) * Math.PI * radius ** 3 * fluidDensity;
-}
+  const bindGroupLayout = device.createBindGroupLayout({
+    entries: [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    ],
+  });
+  const shaderModule = device.createShaderModule({ code: CALIBRATION_SHADER_SOURCE });
+  const pipeline = device.createComputePipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+    compute: { module: shaderModule, entryPoint: 'computeMain' },
+  });
+  const bindGroup = device.createBindGroup({
+    layout: bindGroupLayout,
+    entries: [
+      { binding: 0, resource: { buffer: uniformBuffer } },
+      { binding: 1, resource: { buffer: resultBuffer } },
+    ],
+  });
 
-export function computeRadiusFromMass(mass, fluidDensity) {
-  return Math.cbrt(mass / ((4 / 3) * Math.PI * fluidDensity));
-}
+  const uniformData = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
+  uniformData.set([smoothingRadius, dripRadiusRatio, anchorRadiusRatio, fluidDensity], 0);
+  uniformData.set([localNeighborCount, 0, 0, 0], 4);
+  device.queue.writeBuffer(uniformBuffer, 0, uniformData);
 
-export function computeIsoLevel(mass, smoothingRadius, calibrationFactor) {
-  return calibrationFactor * mass * computeDensityKernel(0, smoothingRadius);
-}
+  const commandEncoder = device.createCommandEncoder();
+  const pass = commandEncoder.beginComputePass();
+  pass.setPipeline(pipeline);
+  pass.setBindGroup(0, bindGroup);
+  pass.dispatchWorkgroups(1);
+  pass.end();
+  commandEncoder.copyBufferToBuffer(resultBuffer, 0, stagingBuffer, 0, CALIBRATION_RESULT_SIZE);
+  device.queue.submit([commandEncoder.finish()]);
 
-export function computeIsoLevelCalibrationFactorForRadiusRatio(radiusRatio) {
-  return (1 - radiusRatio ** 2) ** 3;
-}
+  await stagingBuffer.mapAsync(GPUMapMode.READ);
+  const [dripRadius, anchorRadius, isoLevel, gradientMagnitudeMax] = new Float32Array(stagingBuffer.getMappedRange().slice(0));
+  stagingBuffer.unmap();
 
-export const ISO_LEVEL_C = computeIsoLevelCalibrationFactorForRadiusRatio(DRIP_RADIUS_TO_H_RATIO);
-
-export function computeIsoConsistentRadius({ isoLevel, radiusRatio, smoothingRadius, fluidDensity }) {
-  const calibrationFactor = computeIsoLevelCalibrationFactorForRadiusRatio(radiusRatio);
-  const requiredMass = isoLevel / (calibrationFactor * computeDensityKernel(0, smoothingRadius));
-  return computeRadiusFromMass(requiredMass, fluidDensity);
-}
-
-export function computeGradientMagnitudeBound(mass, smoothingRadius, localNeighborCount) {
-  const gradientKernelMax = POLY6_GRADIENT_MAX_COEFFICIENT / smoothingRadius ** 4;
-  return localNeighborCount * mass * gradientKernelMax;
+  return { dripRadius, anchorRadius, isoLevel, gradientMagnitudeMax };
 }
 
 // ───── PIPELINE SETUP ─────
-
-const UNIFORM_BUFFER_SIZE = 2 * 16;
 
 export function makeDripComputePass(device) {
   const uniformBuffer = device.createBuffer({

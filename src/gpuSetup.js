@@ -1,4 +1,17 @@
-import { SHADER_SOURCE as BLOOM_SHADER_SOURCE } from '../shaders/bloomShader.js';
+import { UNIFORM_BUFFER_SIZE } from './parameters.js';
+
+// ───── SHARED WGSL CHUNKS ─────
+
+export const FULLSCREEN_TRIANGLE_POSITION_CHUNK = /* wgsl */ `
+  fn getFullscreenTrianglePosition(vertexIndex: u32) -> vec2<f32> {
+    var positions = array<vec2<f32>, 3>(
+      vec2<f32>(-1.0, -1.0),
+      vec2<f32>(3.0, -1.0),
+      vec2<f32>(-1.0, 3.0),
+    );
+    return positions[vertexIndex];
+  }
+`;
 
 // ───── GRAPHICS CONTEXT (device, canvas, presentation format) ─────
 
@@ -55,7 +68,6 @@ export function getBuffer(registry, name) {
 
 const BLOOM_DOWNSAMPLE = 2;
 export const MAIN_TEXTURE_FORMAT = 'rgba16float';
-const UNIFORM_BUFFER_SIZE = 2 * 16;
 
 function _makeTexture(device, width, height) {
   return device.createTexture({
@@ -65,7 +77,7 @@ function _makeTexture(device, width, height) {
   });
 }
 
-export function makePostProcessor(device, canvasFormat) {
+export function makePostProcessor(device, canvasFormat, shaderSource) {
   const uniformBuffer = device.createBuffer({
     size: UNIFORM_BUFFER_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -88,7 +100,7 @@ export function makePostProcessor(device, canvasFormat) {
     ],
   });
 
-  const shaderModule = device.createShaderModule({ code: BLOOM_SHADER_SOURCE });
+  const shaderModule = device.createShaderModule({ code: shaderSource });
   function _makePipeline(fragmentEntryPoint, bindGroupLayout, targetFormat) {
     return device.createRenderPipeline({
       layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
@@ -120,12 +132,18 @@ export function makePostProcessor(device, canvasFormat) {
   };
 }
 
+function _makeUniformAndSamplerEntries(postProcessor) {
+  return [
+    { binding: 0, resource: { buffer: postProcessor.uniformBuffer } },
+    { binding: 1, resource: postProcessor.sampler },
+  ];
+}
+
 function _makeSingleTextureBindGroup(postProcessor, texture) {
   return postProcessor.device.createBindGroup({
     layout: postProcessor.singleTextureBindGroupLayout,
     entries: [
-      { binding: 0, resource: { buffer: postProcessor.uniformBuffer } },
-      { binding: 1, resource: postProcessor.sampler },
+      ..._makeUniformAndSamplerEntries(postProcessor),
       { binding: 2, resource: texture.createView() },
     ],
   });
@@ -135,8 +153,7 @@ function _makeCompositeBindGroup(postProcessor, mainTexture, bloomTexture) {
   return postProcessor.device.createBindGroup({
     layout: postProcessor.dualTextureBindGroupLayout,
     entries: [
-      { binding: 0, resource: { buffer: postProcessor.uniformBuffer } },
-      { binding: 1, resource: postProcessor.sampler },
+      ..._makeUniformAndSamplerEntries(postProcessor),
       { binding: 2, resource: mainTexture.createView() },
       { binding: 3, resource: bloomTexture.createView() },
     ],
