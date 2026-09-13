@@ -124,8 +124,7 @@ fn computePhaseBlend(pair: PairState, tNow: f32) -> PhaseBlend {
 // ───── HELPER FUNCTIONS - FORCES ─────
 
 fn computeNetAcceleration(myPosition: vec3<f32>, anchorPosition: vec3<f32>, myMass: f32, anchorMass: f32, integrationMass: f32, gravity: f32, h: f32) -> vec3<f32> {
-  const GAMMA: f32 = 2.0;
-  let force = computeCohesionForce(myPosition, anchorPosition, myMass, anchorMass, GAMMA, h);
+  let force = computeCohesionForce(myPosition, anchorPosition, myMass, anchorMass, 2.0, h);
   return computeAcceleration(force, integrationMass, gravity);
 }
 

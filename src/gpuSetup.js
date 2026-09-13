@@ -1,6 +1,7 @@
 import { UNIFORM_BUFFER_SIZE } from './constants.js';
+import { initializeUniformBuffer, writeUniformBuffer, drawFullscreenPass } from './gpuHelpers.js';
 
-// ───── SHARED WGSL CHUNKS ─────
+// ───── CONSTANTS ─────
 
 export const FULLSCREEN_TRIANGLE_POSITION_CHUNK = `
   fn getFullscreenTrianglePosition(vertexIndex: u32) -> vec2<f32> {
@@ -13,31 +14,43 @@ export const FULLSCREEN_TRIANGLE_POSITION_CHUNK = `
   }
 `;
 
-// ───── GRAPHICS CONTEXT (device, canvas, presentation format) ─────
+// ───── GRAPHICS CONTEXT ─────
 
-export async function initializeGraphicsContext(canvas) {
+async function _requestGpuAdapter() {
   if (!navigator.gpu) {
     throw new Error('gpuSetup: WebGPU is not available in this browser');
   }
-
   const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) {
     throw new Error('gpuSetup: no WebGPU adapter available (GPU/driver not supported, or WebGPU disabled in this browser)');
   }
+  return adapter;
+}
+
+function _computeCanvasPixelSize(canvas) {
+  const RESOLUTION_SCALE = 0.6;
+  const pixelRatio = Math.min(window.devicePixelRatio, RESOLUTION_SCALE);
+  return {
+    width: Math.max(1, Math.floor(canvas.clientWidth * pixelRatio)),
+    height: Math.max(1, Math.floor(canvas.clientHeight * pixelRatio)),
+  };
+}
+
+function _configureCanvas(canvas, canvasContext, device, presentationFormat) {
+  const { width, height } = _computeCanvasPixelSize(canvas);
+  canvas.width = width;
+  canvas.height = height;
+  canvasContext.configure({ device, format: presentationFormat, alphaMode: 'opaque' });
+}
+
+export async function initializeGraphicsContext(canvas) {
+  const adapter = await _requestGpuAdapter();
   const device = await adapter.requestDevice();
   const canvasContext = canvas.getContext('webgpu');
   const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-
-  function _configure() {
-    const RESOLUTION_SCALE = 0.7;
-    const pixelRatio = Math.min(window.devicePixelRatio, RESOLUTION_SCALE);
-    canvas.width = Math.max(1, Math.floor(canvas.clientWidth * pixelRatio));
-    canvas.height = Math.max(1, Math.floor(canvas.clientHeight * pixelRatio));
-    canvasContext.configure({ device, format: presentationFormat, alphaMode: 'opaque' });
-  }
-
-  _configure();
-  new ResizeObserver(_configure).observe(canvas);
+  const configure = () => _configureCanvas(canvas, canvasContext, device, presentationFormat);
+  configure();
+  new ResizeObserver(configure).observe(canvas);
 
   return { device, canvas, canvasContext, presentationFormat };
 }
@@ -66,7 +79,6 @@ export function getBuffer(registry, name) {
 
 // ───── BLOOM SETUP ─────
 
-const BLOOM_DOWNSAMPLE = 2;
 export const MAIN_TEXTURE_FORMAT = 'rgba16float';
 
 function _initializeTexture(device, width, height) {
@@ -77,21 +89,22 @@ function _initializeTexture(device, width, height) {
   });
 }
 
-export function initializePostProcessor(device, canvasFormat, shaderSource) {
-  const uniformBuffer = device.createBuffer({
-    size: UNIFORM_BUFFER_SIZE,
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  const sampler = device.createSampler({ minFilter: 'linear', magFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+function _initializeBloomSampler(device) {
+  return device.createSampler({ minFilter: 'linear', magFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge' });
+}
 
-  const singleTextureBindGroupLayout = device.createBindGroupLayout({
+function _initializeSingleTextureBindGroupLayout(device) {
+  return device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
       { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: {} },
     ],
   });
-  const dualTextureBindGroupLayout = device.createBindGroupLayout({
+}
+
+function _initializeDualTextureBindGroupLayout(device) {
+  return device.createBindGroupLayout({
     entries: [
       { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: {} },
@@ -99,26 +112,19 @@ export function initializePostProcessor(device, canvasFormat, shaderSource) {
       { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: {} },
     ],
   });
+}
 
-  const shaderModule = device.createShaderModule({ code: shaderSource });
-  function _initializePipeline(fragmentEntryPoint, bindGroupLayout, targetFormat) {
-    return device.createRenderPipeline({
-      layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-      vertex: { module: shaderModule, entryPoint: 'vertexFullscreenTriangle' },
-      fragment: { module: shaderModule, entryPoint: fragmentEntryPoint, targets: [{ format: targetFormat }] },
-      primitive: { topology: 'triangle-list' },
-    });
-  }
+function _initializeBloomPipeline(device, shaderModule, fragmentEntryPoint, bindGroupLayout, targetFormat) {
+  return device.createRenderPipeline({
+    layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
+    vertex: { module: shaderModule, entryPoint: 'vertexFullscreenTriangle' },
+    fragment: { module: shaderModule, entryPoint: fragmentEntryPoint, targets: [{ format: targetFormat }] },
+    primitive: { topology: 'triangle-list' },
+  });
+}
 
+function _initializeEmptyPostProcessorTextureState() {
   return {
-    device,
-    uniformBuffer,
-    sampler,
-    singleTextureBindGroupLayout,
-    dualTextureBindGroupLayout,
-    extractPipeline: _initializePipeline('fragmentExtract', singleTextureBindGroupLayout, MAIN_TEXTURE_FORMAT),
-    blurPipeline: _initializePipeline('fragmentBlur', singleTextureBindGroupLayout, MAIN_TEXTURE_FORMAT),
-    compositePipeline: _initializePipeline('fragmentComposite', dualTextureBindGroupLayout, canvasFormat),
     width: 0,
     height: 0,
     mainTexture: null,
@@ -129,6 +135,26 @@ export function initializePostProcessor(device, canvasFormat, shaderSource) {
     blurHBindGroup: null,
     blurVBindGroup: null,
     compositeBindGroup: null,
+  };
+}
+
+export function initializePostProcessor(device, canvasFormat, shaderSource) {
+  const uniformBuffer = initializeUniformBuffer(device);
+  const sampler = _initializeBloomSampler(device);
+  const singleTextureBindGroupLayout = _initializeSingleTextureBindGroupLayout(device);
+  const dualTextureBindGroupLayout = _initializeDualTextureBindGroupLayout(device);
+  const shaderModule = device.createShaderModule({ code: shaderSource });
+
+  return {
+    device,
+    uniformBuffer,
+    sampler,
+    singleTextureBindGroupLayout,
+    dualTextureBindGroupLayout,
+    extractPipeline: _initializeBloomPipeline(device, shaderModule, 'fragmentExtract', singleTextureBindGroupLayout, MAIN_TEXTURE_FORMAT),
+    blurPipeline: _initializeBloomPipeline(device, shaderModule, 'fragmentBlur', singleTextureBindGroupLayout, MAIN_TEXTURE_FORMAT),
+    compositePipeline: _initializeBloomPipeline(device, shaderModule, 'fragmentComposite', dualTextureBindGroupLayout, canvasFormat),
+    ..._initializeEmptyPostProcessorTextureState(),
   };
 }
 
@@ -160,12 +186,12 @@ function _initializeCompositeBindGroup(postProcessor, mainTexture, bloomTexture)
   });
 }
 
-export function resizeNeeded(postProcessor, width, height) {
+function _resizeNeeded(postProcessor, width, height) {
   return postProcessor.width !== width || postProcessor.height !== height;
 }
 
 export function resizePostProcessor(postProcessor, width, height) {
-  if (!resizeNeeded(postProcessor, width, height)) {
+  if (!_resizeNeeded(postProcessor, width, height)) {
     return;
   }
 
@@ -173,6 +199,7 @@ export function resizePostProcessor(postProcessor, width, height) {
     .filter(Boolean)
     .forEach((texture) => texture.destroy());
 
+  const BLOOM_DOWNSAMPLE = 2;
   const bloomWidth = Math.max(1, Math.floor(width / BLOOM_DOWNSAMPLE));
   const bloomHeight = Math.max(1, Math.floor(height / BLOOM_DOWNSAMPLE));
 
@@ -197,36 +224,22 @@ function _writeBloomUniforms(postProcessor, { blurDirection, threshold, intensit
   const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
   data.set([...blurDirection, 0, 0], 0);
   data.set([threshold, intensity, exposure, 0], 4);
-  postProcessor.device.queue.writeBuffer(postProcessor.uniformBuffer, 0, data);
+  writeUniformBuffer(postProcessor, data);
 }
 
-function _drawFullscreenPass(commandEncoder, pipeline, bindGroup, targetView) {
-  const pass = commandEncoder.beginRenderPass({
-    colorAttachments: [{ view: targetView, loadOp: 'clear', storeOp: 'store' }],
-  });
-  pass.setPipeline(pipeline);
-  pass.setBindGroup(0, bindGroup);
-  pass.draw(3);
-  pass.end();
+function _runBloomPass(postProcessor, commandEncoder, pipeline, bindGroup, targetView, uniforms) {
+  _writeBloomUniforms(postProcessor, uniforms);
+  drawFullscreenPass(commandEncoder, pipeline, bindGroup, targetView);
 }
-
-const DEFAULT_BLOOM_THRESHOLD = 0.2;
-const DEFAULT_BLOOM_INTENSITY = 1.1;
-const DEFAULT_EXPOSURE = 1.5;
 
 export function runPostProcessPass(postProcessor, commandEncoder, canvasTextureView, {
-  threshold = DEFAULT_BLOOM_THRESHOLD,
-  intensity = DEFAULT_BLOOM_INTENSITY,
-  exposure = DEFAULT_EXPOSURE,
+  threshold = 0.2,
+  intensity = 1.1,
+  exposure = 1.5,
 } = {}) {
-  _writeBloomUniforms(postProcessor, { blurDirection: [0, 0], threshold, intensity, exposure });
-  _drawFullscreenPass(commandEncoder, postProcessor.extractPipeline, postProcessor.extractBindGroup, postProcessor.extractTexture.createView());
+  _runBloomPass(postProcessor, commandEncoder, postProcessor.extractPipeline, postProcessor.extractBindGroup, postProcessor.extractTexture.createView(), { blurDirection: [0, 0], threshold, intensity, exposure });
+  _runBloomPass(postProcessor, commandEncoder, postProcessor.blurPipeline, postProcessor.blurHBindGroup, postProcessor.blurATexture.createView(), { blurDirection: [1, 0], threshold, intensity, exposure });
+  _runBloomPass(postProcessor, commandEncoder, postProcessor.blurPipeline, postProcessor.blurVBindGroup, postProcessor.blurBTexture.createView(), { blurDirection: [0, 1], threshold, intensity, exposure });
 
-  _writeBloomUniforms(postProcessor, { blurDirection: [1, 0], threshold, intensity, exposure });
-  _drawFullscreenPass(commandEncoder, postProcessor.blurPipeline, postProcessor.blurHBindGroup, postProcessor.blurATexture.createView());
-
-  _writeBloomUniforms(postProcessor, { blurDirection: [0, 1], threshold, intensity, exposure });
-  _drawFullscreenPass(commandEncoder, postProcessor.blurPipeline, postProcessor.blurVBindGroup, postProcessor.blurBTexture.createView());
-
-  _drawFullscreenPass(commandEncoder, postProcessor.compositePipeline, postProcessor.compositeBindGroup, canvasTextureView);
+  drawFullscreenPass(commandEncoder, postProcessor.compositePipeline, postProcessor.compositeBindGroup, canvasTextureView);
 }

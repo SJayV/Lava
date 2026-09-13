@@ -1,17 +1,34 @@
 import { registerBuffer, getBuffer } from './gpuSetup.js';
 
-// ───── HELPER FUNCTIONS - PING-PONG BUFFERS ─────
-
-function initializePingPongBuffers(registry, baseName, size) {
-  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  registerBuffer(registry, `${baseName}A`, { size, usage });
-  registerBuffer(registry, `${baseName}B`, { size, usage });
-}
-
-// ───── DROP STATE ─────
+// ───── CONSTANTS ─────
 
 const FLOATS_PER_DROP = 8;
 const BYTES_PER_DROP = FLOATS_PER_DROP * 4;
+const FLOATS_PER_PAIR_STATE = 4;
+
+// ───── HELPER FUNCTIONS - STORAGE BUFFERS ─────
+
+function _initializeBuffer(registry, name, size) {
+  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+  registerBuffer(registry, name, { size, usage });
+}
+
+function _writeBufferRecords(device, registry, name, records, packRecords) {
+  device.queue.writeBuffer(getBuffer(registry, name), 0, packRecords(records));
+}
+
+function _initializePingPongBuffers(registry, baseName, size) {
+  _initializeBuffer(registry, `${baseName}A`, size);
+  _initializeBuffer(registry, `${baseName}B`, size);
+}
+
+function _initializePingPongState(device, registry, baseName, bufferSize, records, packRecords) {
+  _initializePingPongBuffers(registry, baseName, bufferSize);
+  _writeBufferRecords(device, registry, `${baseName}A`, records, packRecords);
+  return { registry, activeIndex: 0 };
+}
+
+// ───── HELPER FUNCTIONS - DROP RECORDS ─────
 
 export function computeSmoothingRadiusFromLineSpan({ ballCount, lineSpanWidth, spacingToHRatio = 0.6 }) {
   const spacing = lineSpanWidth / (ballCount - 1);
@@ -43,48 +60,42 @@ export function packDropRecords(drops) {
   return packed;
 }
 
-export function initializeAnchorState(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
+function _buildLineDropRecords({ ballCount, lineSpanWidth, lineY, radius }) {
   const positions = computeLinePositions({ ballCount, lineSpanWidth, lineY });
-  const anchorRecords = positions.map((position) => initializeDropRecord({ position, radius }));
+  return positions.map((position) => initializeDropRecord({ position, radius }));
+}
 
-  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  registerBuffer(registry, 'anchorState', { size: ballCount * BYTES_PER_DROP, usage });
-  device.queue.writeBuffer(getBuffer(registry, 'anchorState'), 0, packDropRecords(anchorRecords));
+// ───── HELPER FUNCTIONS - DROP STATE BUFFERS ─────
+
+function _initializeAnchorState(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
+  const anchorRecords = _buildLineDropRecords({ ballCount, lineSpanWidth, lineY, radius });
+  _initializeBuffer(registry, 'anchorState', ballCount * BYTES_PER_DROP);
+  _writeBufferRecords(device, registry, 'anchorState', anchorRecords, packDropRecords);
   return { registry };
 }
 
-export function getAnchorBuffer(anchorState) {
+function _getAnchorBuffer(anchorState) {
   return getBuffer(anchorState.registry, 'anchorState');
 }
 
-export function initializeDripState(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
-  const positions = computeLinePositions({ ballCount, lineSpanWidth, lineY });
-  const dripRecords = positions.map((position) => initializeDropRecord({ position, radius }));
-
-  initializePingPongBuffers(registry, 'dripState', ballCount * BYTES_PER_DROP);
-  const dripState = { registry, pairCount: ballCount, activeIndex: 0 };
-  device.queue.writeBuffer(getCurrentDripBuffer(dripState), 0, packDropRecords(dripRecords));
-  return dripState;
+function _initializeDropState(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
+  const dropRecords = _buildLineDropRecords({ ballCount, lineSpanWidth, lineY, radius });
+  const pingPongState = _initializePingPongState(device, registry, 'dropState', ballCount * BYTES_PER_DROP, dropRecords, packDropRecords);
+  return { ...pingPongState, pairCount: ballCount };
 }
 
-export function getCurrentDripBuffer(dripState) {
-  return getBuffer(dripState.registry, dripState.activeIndex === 0 ? 'dripStateA' : 'dripStateB');
+export function getDropBufferPair(dropState) {
+  return [getBuffer(dropState.registry, 'dropStateA'), getBuffer(dropState.registry, 'dropStateB')];
 }
 
-export function getDripBufferPair(dripState) {
-  return [getBuffer(dripState.registry, 'dripStateA'), getBuffer(dripState.registry, 'dripStateB')];
+export function swapDropState(dropState) {
+  dropState.activeIndex = 1 - dropState.activeIndex;
 }
 
-export function swapDripState(dripState) {
-  dripState.activeIndex = 1 - dripState.activeIndex;
-}
-
-// ───── PAIR STATE ─────
-
-const FLOATS_PER_PAIR_STATE = 4;
-const NEVER_TRIGGERED_MU = -1e9;
+// ───── HELPER FUNCTIONS - PAIR STATE RECORDS ─────
 
 export function initializePairState({ tNow = 0, startGrowing = false }) {
+  const NEVER_TRIGGERED_MU = -1e9;
   if (startGrowing) {
     return { phaseCode: 1, muAttached: NEVER_TRIGGERED_MU, muGrowing: tNow, muFalling: NEVER_TRIGGERED_MU };
   }
@@ -103,12 +114,12 @@ export function packPairStateRecords(records) {
   return packed;
 }
 
-export function initializePairStateBuffers(device, registry, pairCount) {
-  const initialPairStates = Array.from({ length: pairCount }, () => initializePairState({ tNow: Math.random() * 20 }));
+// ───── HELPER FUNCTIONS - PAIR STATE BUFFERS ─────
 
-  initializePingPongBuffers(registry, 'pairState', pairCount * FLOATS_PER_PAIR_STATE * 4);
-  device.queue.writeBuffer(getBuffer(registry, 'pairStateA'), 0, packPairStateRecords(initialPairStates));
-  return { registry, pairCount, activeIndex: 0 };
+function _initializePairStateBuffers(device, registry, pairCount) {
+  const initialPairStates = Array.from({ length: pairCount }, () => initializePairState({ tNow: Math.random() * 20 }));
+  const pingPongState = _initializePingPongState(device, registry, 'pairState', pairCount * FLOATS_PER_PAIR_STATE * 4, initialPairStates, packPairStateRecords);
+  return { ...pingPongState, pairCount };
 }
 
 export function getPairStateBufferPair(pairState) {
@@ -122,8 +133,8 @@ export function swapPairState(pairState) {
 // ───── PUBLIC INTERFACE ─────
 
 export function initializeSceneState(device, registry, { pairCount, lineSpanWidth, lineY, anchorRadius, dripRadius }) {
-  const anchorState = initializeAnchorState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: anchorRadius });
-  const dripState = initializeDripState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: dripRadius });
-  const pairState = initializePairStateBuffers(device, registry, pairCount);
-  return { anchorBuffer: getAnchorBuffer(anchorState), dripState, pairState };
+  const anchorState = _initializeAnchorState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: anchorRadius });
+  const dropState = _initializeDropState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: dripRadius });
+  const pairState = _initializePairStateBuffers(device, registry, pairCount);
+  return { anchorBuffer: _getAnchorBuffer(anchorState), dropState, pairState };
 }
