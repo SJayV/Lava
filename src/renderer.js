@@ -1,7 +1,7 @@
 import { SHADER_SOURCE } from '../shaders/raymarchShader.js';
 import { UNIFORM_BUFFER_SIZE } from './constants.js';
 import { getDropBufferPair } from './state.js';
-import { initializeGpuPass, writeUniformBuffer, initializeBufferBindGroup, drawFullscreenPass } from './gpuHelpers.js';
+import { initializeGpuPass, writeUniformBuffer, initializeBindGroupsByActiveIndex, drawFullscreenPass } from './helpers.js';
 
 // ───── CONSTANTS ─────
 
@@ -85,11 +85,8 @@ function _writeRaymarchUniforms(raymarcher, { noiseScale = 9, noiseSpeed = 0.5, 
 }
 
 function _initializeRaymarchBindGroupsByActiveIndex(raymarcher, anchorBuffer, dropState) {
-  const [dropStateA, dropStateB] = getDropBufferPair(dropState);
-  return [
-    initializeBufferBindGroup(raymarcher, [anchorBuffer, dropStateA]),
-    initializeBufferBindGroup(raymarcher, [anchorBuffer, dropStateB]),
-  ];
+  const dropStatePair = getDropBufferPair(dropState);
+  return initializeBindGroupsByActiveIndex(raymarcher, (activeIndex) => [anchorBuffer, dropStatePair[activeIndex]]);
 }
 
 // ───── PUBLIC INTERFACE ─────

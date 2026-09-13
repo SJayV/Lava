@@ -1,4 +1,4 @@
-import { FULLSCREEN_TRIANGLE_POSITION_CHUNK } from '../src/gpuSetup.js';
+import { getFullscreenTriangleChunk } from '../shaderChunks/helpersChunk.js';
 
 export const SHADER_SOURCE = `
 struct PostProcessUniforms {
@@ -16,7 +16,7 @@ struct VertexOutput {
 @group(0) @binding(2) var sourceTexture: texture_2d<f32>;
 @group(0) @binding(3) var bloomTexture: texture_2d<f32>;
 
-${FULLSCREEN_TRIANGLE_POSITION_CHUNK}
+${getFullscreenTriangleChunk()}
 
 // ───── HELPER FUNCTIONS - VERTEX ─────
 

@@ -1,7 +1,6 @@
 import { getDensityKernelChunk, getParticleMassChunk } from '../shaderChunks/shapeChunk.js';
-import { getNoiseChunk } from '../shaderChunks/noiseChunk.js';
+import { getNoiseChunk, getFullscreenTriangleChunk } from '../shaderChunks/helpersChunk.js';
 import { getColorChunk } from '../shaderChunks/colorChunk.js';
-import { FULLSCREEN_TRIANGLE_POSITION_CHUNK } from '../src/gpuSetup.js';
 
 export const SHADER_SOURCE = `
 struct RaymarchUniforms {
@@ -155,7 +154,7 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
   return result;
 }
 
-${FULLSCREEN_TRIANGLE_POSITION_CHUNK}
+${getFullscreenTriangleChunk()}
 
 // ───── HELPER FUNCTIONS - CAMERA RAY GENERATION ─────
 

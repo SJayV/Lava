@@ -2,7 +2,7 @@ import { SHADER_SOURCE } from '../shaders/simulationShader.js';
 import { SHADER_SOURCE as CALIBRATION_SHADER_SOURCE } from '../shaders/calibrationShader.js';
 import { UNIFORM_BUFFER_SIZE } from './constants.js';
 import { getDropBufferPair, getPairStateBufferPair, swapDropState, swapPairState } from './state.js';
-import { writeUniformBuffer, initializeGpuPass, initializeBufferBindGroup, dispatchComputePass } from './gpuHelpers.js';
+import { writeUniformBuffer, initializeGpuPass, initializeBufferBindGroup, initializeBindGroupsByActiveIndex, dispatchComputePass } from './helpers.js';
 
 // ───── SIZING CONSTANTS ─────
 
@@ -87,12 +87,15 @@ function _writeDripPhysicsUniforms(computePass, view) {
 }
 
 function _initializeDripBindGroupsByActiveIndex(computePass, anchorBuffer, dropState, pairState) {
-  const [dropStateA, dropStateB] = getDropBufferPair(dropState);
-  const [pairStateA, pairStateB] = getPairStateBufferPair(pairState);
-  return [
-    initializeBufferBindGroup(computePass, [anchorBuffer, dropStateA, pairStateA, dropStateB, pairStateB]),
-    initializeBufferBindGroup(computePass, [anchorBuffer, dropStateB, pairStateB, dropStateA, pairStateA]),
-  ];
+  const dropStatePair = getDropBufferPair(dropState);
+  const pairStatePair = getPairStateBufferPair(pairState);
+  return initializeBindGroupsByActiveIndex(computePass, (activeIndex, otherIndex) => [
+    anchorBuffer,
+    dropStatePair[activeIndex],
+    pairStatePair[activeIndex],
+    dropStatePair[otherIndex],
+    pairStatePair[otherIndex],
+  ]);
 }
 
 // ───── PUBLIC INTERFACE ─────

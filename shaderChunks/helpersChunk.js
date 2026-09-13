@@ -3,6 +3,19 @@ const HASH_PRIME_Y = 668265263;
 const HASH_PRIME_Z = 2147483647;
 const HASH_MIX_A = 1274126177;
 
+export function getFullscreenTriangleChunk() {
+  return `
+    fn getFullscreenTrianglePosition(vertexIndex: u32) -> vec2<f32> {
+      var positions = array<vec2<f32>, 3>(
+        vec2<f32>(-1.0, -1.0),
+        vec2<f32>(3.0, -1.0),
+        vec2<f32>(-1.0, 3.0),
+      );
+      return positions[vertexIndex];
+    }
+  `;
+}
+
 export function getHashChunk() {
   return `
     fn hashLattice3D(x: i32, y: i32, z: i32) -> f32 {

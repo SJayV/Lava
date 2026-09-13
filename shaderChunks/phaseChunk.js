@@ -1,4 +1,4 @@
-import { getHashChunk } from './noiseChunk.js';
+import { getHashChunk } from './helpersChunk.js';
 
 export function getPhaseChunk() {
   return `

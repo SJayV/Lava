@@ -36,6 +36,10 @@ export function initializeBufferBindGroup(pass, buffers) {
   });
 }
 
+export function initializeBindGroupsByActiveIndex(pass, buildBuffersForIndex) {
+  return [0, 1].map((activeIndex) => initializeBufferBindGroup(pass, buildBuffersForIndex(activeIndex, 1 - activeIndex)));
+}
+
 export function dispatchComputePass(commandEncoder, pipeline, bindGroup, workgroupCount) {
   const pass = commandEncoder.beginComputePass();
   pass.setPipeline(pipeline);

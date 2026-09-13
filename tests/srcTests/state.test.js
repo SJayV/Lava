@@ -3,6 +3,7 @@ import {
   computeLinePositions,
   computeSmoothingRadiusFromLineSpan,
   initializeDropRecord,
+  initializeDropRecordArray,
   packDropRecords,
   initializePairState,
   initializePairStateRecord,
@@ -95,6 +96,14 @@ describe('initializeDropRecord', () => {
     expect(drop.position).toEqual([1, 2, 3]);
     expect(drop.radius).toBe(0.1);
     expect(drop.velocity).toEqual([0, 0, 0]);
+  });
+});
+
+describe('initializeDropRecordArray / packDropRecords', () => {
+  it('packs position, radius, velocity and speed in order', () => {
+    const record = initializeDropRecordArray({ position: [1, 2, 3], radius: 0.5, velocity: [3, 4, 0] });
+
+    expect(record).toEqual([1, 2, 3, 0.5, 3, 4, 0, 5]);
   });
 });
 

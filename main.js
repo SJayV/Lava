@@ -18,20 +18,12 @@ function computeTraceBounds({ lineSpanWidth, h }) {
   };
 }
 
-function computeAspectRatio(canvas) {
-  return canvas.clientWidth / canvas.clientHeight;
-}
-
-function computeFocalLength(fovVertical) {
-  return 1 / Math.tan(fovVertical / 2);
-}
-
 async function initializeWorld(canvas, device) {
-  const aspectRatio = computeAspectRatio(canvas);
+  const aspectRatio = canvas.clientWidth / canvas.clientHeight;
   const eyeDistance = computeDistance(CAMERA_EYE, CAMERA_TARGET);
   const lineSpanWidth = computeLineSpanWidth({ eyeDistance, fovVertical: FOV_VERTICAL, aspectRatio });
   const cameraBasis = computeCameraBasisVectors(CAMERA_EYE, CAMERA_TARGET, CAMERA_UP);
-  const focalLength = computeFocalLength(FOV_VERTICAL);
+  const focalLength = 1 / Math.tan(FOV_VERTICAL / 2);
   const h = computeSmoothingRadiusFromLineSpan({ ballCount: PAIR_COUNT, lineSpanWidth });
 
   const { dripRadius, anchorRadius, isoLevel, gradientMagnitudeMax } = await computeCalibration(device, { smoothingRadius: h, dripRadiusRatio: DRIP_RADIUS_TO_H_RATIO, anchorRadiusRatio: ANCHOR_RADIUS_TO_H_RATIO, fluidDensity: FLUID_DENSITY, localNeighborCount: N_LOCAL });

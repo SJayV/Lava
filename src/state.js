@@ -25,7 +25,15 @@ function _initializePingPongBuffers(registry, baseName, size) {
 function _initializePingPongState(device, registry, baseName, bufferSize, records, packRecords) {
   _initializePingPongBuffers(registry, baseName, bufferSize);
   _writeBufferRecords(device, registry, `${baseName}A`, records, packRecords);
-  return { registry, activeIndex: 0 };
+  return { registry, baseName, activeIndex: 0 };
+}
+
+function _getPingPongBufferPair(pingPongState) {
+  return [getBuffer(pingPongState.registry, `${pingPongState.baseName}A`), getBuffer(pingPongState.registry, `${pingPongState.baseName}B`)];
+}
+
+function _swapPingPongState(pingPongState) {
+  pingPongState.activeIndex = 1 - pingPongState.activeIndex;
 }
 
 // ───── HELPER FUNCTIONS - DROP RECORDS ─────
@@ -48,14 +56,17 @@ export function initializeDropRecord({ position, radius, velocity = [0, 0, 0] })
   return { position, radius, velocity };
 }
 
+export function initializeDropRecordArray({ position, radius, velocity }) {
+  const [x, y, z] = position;
+  const [vx, vy, vz] = velocity;
+  const speed = Math.hypot(vx, vy, vz);
+  return [x, y, z, radius, vx, vy, vz, speed];
+}
+
 export function packDropRecords(drops) {
   const packed = new Float32Array(drops.length * FLOATS_PER_DROP);
   drops.forEach((drop, index) => {
-    const offset = index * FLOATS_PER_DROP;
-    const [x, y, z] = drop.position;
-    const [vx, vy, vz] = drop.velocity;
-    const speed = Math.hypot(vx, vy, vz);
-    packed.set([x, y, z, drop.radius, vx, vy, vz, speed], offset);
+    packed.set(initializeDropRecordArray(drop), index * FLOATS_PER_DROP);
   });
   return packed;
 }
@@ -67,15 +78,12 @@ function _buildLineDropRecords({ ballCount, lineSpanWidth, lineY, radius }) {
 
 // ───── HELPER FUNCTIONS - DROP STATE BUFFERS ─────
 
-function _initializeAnchorState(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
+function _initializeAnchorBuffer(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
+  const ANCHOR_BUFFER_NAME = 'anchorState';
   const anchorRecords = _buildLineDropRecords({ ballCount, lineSpanWidth, lineY, radius });
-  _initializeBuffer(registry, 'anchorState', ballCount * BYTES_PER_DROP);
-  _writeBufferRecords(device, registry, 'anchorState', anchorRecords, packDropRecords);
-  return { registry };
-}
-
-function _getAnchorBuffer(anchorState) {
-  return getBuffer(anchorState.registry, 'anchorState');
+  _initializeBuffer(registry, ANCHOR_BUFFER_NAME, ballCount * BYTES_PER_DROP);
+  _writeBufferRecords(device, registry, ANCHOR_BUFFER_NAME, anchorRecords, packDropRecords);
+  return getBuffer(registry, ANCHOR_BUFFER_NAME);
 }
 
 function _initializeDropState(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
@@ -85,11 +93,11 @@ function _initializeDropState(device, registry, { ballCount, lineSpanWidth, line
 }
 
 export function getDropBufferPair(dropState) {
-  return [getBuffer(dropState.registry, 'dropStateA'), getBuffer(dropState.registry, 'dropStateB')];
+  return _getPingPongBufferPair(dropState);
 }
 
 export function swapDropState(dropState) {
-  dropState.activeIndex = 1 - dropState.activeIndex;
+  _swapPingPongState(dropState);
 }
 
 // ───── HELPER FUNCTIONS - PAIR STATE RECORDS ─────
@@ -123,18 +131,18 @@ function _initializePairStateBuffers(device, registry, pairCount) {
 }
 
 export function getPairStateBufferPair(pairState) {
-  return [getBuffer(pairState.registry, 'pairStateA'), getBuffer(pairState.registry, 'pairStateB')];
+  return _getPingPongBufferPair(pairState);
 }
 
 export function swapPairState(pairState) {
-  pairState.activeIndex = 1 - pairState.activeIndex;
+  _swapPingPongState(pairState);
 }
 
 // ───── PUBLIC INTERFACE ─────
 
 export function initializeSceneState(device, registry, { pairCount, lineSpanWidth, lineY, anchorRadius, dripRadius }) {
-  const anchorState = _initializeAnchorState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: anchorRadius });
+  const anchorBuffer = _initializeAnchorBuffer(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: anchorRadius });
   const dropState = _initializeDropState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: dripRadius });
   const pairState = _initializePairStateBuffers(device, registry, pairCount);
-  return { anchorBuffer: _getAnchorBuffer(anchorState), dropState, pairState };
+  return { anchorBuffer, dropState, pairState };
 }
