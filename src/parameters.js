@@ -1,5 +1,3 @@
-export const UNIFORM_BUFFER_SIZE = 10 * 16;
-
 export function makeParameterStore(initialValues) {
   return {
     values: { ...initialValues },

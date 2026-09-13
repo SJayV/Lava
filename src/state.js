@@ -10,8 +10,6 @@ function makePingPongBuffers(registry, baseName, size) {
 
 // ───── DROP STATE ─────
 
-export const LINE_Y = 1.2;
-
 const FLOATS_PER_DROP = 8;
 const BYTES_PER_DROP = FLOATS_PER_DROP * 4;
 
@@ -45,21 +43,32 @@ export function packDropRecords(drops) {
   return packed;
 }
 
-export function makeDropState(registry, dropCount) {
-  makePingPongBuffers(registry, 'dropState', dropCount * BYTES_PER_DROP);
-  return { registry, dropCount, activeIndex: 0 };
+export function makeAnchorState(device, registry, pairCount, anchorRecords) {
+  const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+  registerBuffer(registry, 'anchorState', { size: pairCount * BYTES_PER_DROP, usage });
+  device.queue.writeBuffer(getBuffer(registry, 'anchorState'), 0, packDropRecords(anchorRecords));
+  return { registry };
 }
 
-export function getCurrentDropBuffer(dropState) {
-  return getBuffer(dropState.registry, dropState.activeIndex === 0 ? 'dropStateA' : 'dropStateB');
+export function getAnchorBuffer(anchorState) {
+  return getBuffer(anchorState.registry, 'anchorState');
 }
 
-export function getDropBufferPair(dropState) {
-  return [getBuffer(dropState.registry, 'dropStateA'), getBuffer(dropState.registry, 'dropStateB')];
+export function makeDripState(registry, pairCount) {
+  makePingPongBuffers(registry, 'dripState', pairCount * BYTES_PER_DROP);
+  return { registry, pairCount, activeIndex: 0 };
 }
 
-export function swapDropState(dropState) {
-  dropState.activeIndex = 1 - dropState.activeIndex;
+export function getCurrentDripBuffer(dripState) {
+  return getBuffer(dripState.registry, dripState.activeIndex === 0 ? 'dripStateA' : 'dripStateB');
+}
+
+export function getDripBufferPair(dripState) {
+  return [getBuffer(dripState.registry, 'dripStateA'), getBuffer(dripState.registry, 'dripStateB')];
+}
+
+export function swapDripState(dripState) {
+  dripState.activeIndex = 1 - dripState.activeIndex;
 }
 
 // ───── PAIR STATE ─────

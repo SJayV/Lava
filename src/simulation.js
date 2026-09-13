@@ -1,6 +1,6 @@
 import { SHADER_SOURCE } from '../shaders/simulationShader.js';
 import { SHADER_SOURCE as CALIBRATION_SHADER_SOURCE } from '../shaders/calibrationShader.js';
-import { UNIFORM_BUFFER_SIZE } from './parameters.js';
+import { UNIFORM_BUFFER_SIZE } from './constants.js';
 
 // ───── SIZING CONSTANTS ─────
 
@@ -70,8 +70,9 @@ export function makeDripComputePass(device) {
       { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
       { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
-      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 3, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
       { binding: 4, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+      { binding: 5, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
     ],
   });
 
@@ -89,27 +90,28 @@ export function makeDripComputePass(device) {
 export function writeDripPhysicsUniforms(computePass, view) {
   const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
   data.set([view.h, view.tNow, view.dt, view.fluidDensity], 0);
-  data.set([view.respawnY, view.baseRadius, view.dropCount, view.anchorBaseRadius], 4);
+  data.set([view.respawnY, view.baseRadius, view.pairCount, 0], 4);
   computePass.device.queue.writeBuffer(computePass.uniformBuffer, 0, data);
 }
 
-export function makeDripComputeBindGroup(computePass, currentDropBuffer, currentPairStateBuffer, nextDropBuffer, nextPairStateBuffer) {
+export function makeDripComputeBindGroup(computePass, anchorBuffer, currentDripBuffer, currentPairStateBuffer, nextDripBuffer, nextPairStateBuffer) {
   return computePass.device.createBindGroup({
     layout: computePass.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: computePass.uniformBuffer } },
-      { binding: 1, resource: { buffer: currentDropBuffer } },
-      { binding: 2, resource: { buffer: currentPairStateBuffer } },
-      { binding: 3, resource: { buffer: nextDropBuffer } },
-      { binding: 4, resource: { buffer: nextPairStateBuffer } },
+      { binding: 1, resource: { buffer: anchorBuffer } },
+      { binding: 2, resource: { buffer: currentDripBuffer } },
+      { binding: 3, resource: { buffer: currentPairStateBuffer } },
+      { binding: 4, resource: { buffer: nextDripBuffer } },
+      { binding: 5, resource: { buffer: nextPairStateBuffer } },
     ],
   });
 }
 
-export function runDripComputePass(computePass, commandEncoder, bindGroup, dropCount) {
+export function runDripComputePass(computePass, commandEncoder, bindGroup, pairCount) {
   const pass = commandEncoder.beginComputePass();
   pass.setPipeline(computePass.pipeline);
   pass.setBindGroup(0, bindGroup);
-  pass.dispatchWorkgroups(dropCount);
+  pass.dispatchWorkgroups(pairCount);
   pass.end();
 }

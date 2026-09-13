@@ -1,4 +1,4 @@
-import { UNIFORM_BUFFER_SIZE } from './parameters.js';
+import { UNIFORM_BUFFER_SIZE } from './constants.js';
 
 // ───── SHARED WGSL CHUNKS ─────
 

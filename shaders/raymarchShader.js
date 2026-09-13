@@ -23,27 +23,32 @@ struct Drop {
 }
 
 @group(0) @binding(0) var<uniform> uniforms: RaymarchUniforms;
-@group(0) @binding(1) var<storage, read> drops: array<Drop>;
+@group(0) @binding(1) var<storage, read> anchors: array<Drop>;
+@group(0) @binding(2) var<storage, read> drips: array<Drop>;
 
 ${getDensityKernelChunk()}
 ${getParticleMassChunk()}
 ${getNoiseChunk()}
 ${getColorChunk()}
 
+fn densityContribution(drop: Drop, position: vec3<f32>, h: f32, fluidDensity: f32) -> f32 {
+  let distance = length(position - drop.positionAndRadius.xyz);
+  let mass = computeParticleMass(drop.positionAndRadius.w, fluidDensity);
+  return mass * computeDensityKernel(distance, h);
+}
+
 fn computeDensityField(position: vec3<f32>, relevantMask: u32) -> f32 {
   var total = 0.0;
-  let dropCount = u32(uniforms.fieldParams.w);
+  let pairCount = u32(uniforms.fieldParams.w);
   let h = uniforms.fieldParams.x;
   let fluidDensity = uniforms.fieldParams.z;
-  for (var i = 0u; i < dropCount; i = i + 1u) {
-    if ((relevantMask & (1u << i)) == 0u) {
-      continue;
+  for (var k = 0u; k < pairCount; k = k + 1u) {
+    if ((relevantMask & (1u << k)) != 0u) {
+      total = total + densityContribution(anchors[k], position, h, fluidDensity);
     }
-    let drop = drops[i];
-    let offset = position - drop.positionAndRadius.xyz;
-    let distance = length(offset);
-    let mass = computeParticleMass(drop.positionAndRadius.w, fluidDensity);
-    total = total + mass * computeDensityKernel(distance, h);
+    if ((relevantMask & (1u << (k + pairCount))) != 0u) {
+      total = total + densityContribution(drips[k], position, h, fluidDensity);
+    }
   }
   return applySurfacePerturbation(total, position);
 }
@@ -107,19 +112,27 @@ fn traceDensityIsosurface(rayOrigin: vec3<f32>, rayDirection: vec3<f32>) -> Trac
   }
 
   let h = uniforms.fieldParams.x;
-  let dropCount = u32(uniforms.fieldParams.w);
+  let pairCount = u32(uniforms.fieldParams.w);
 
   var clusterNear = bounds.y;
   var clusterFar = bounds.x;
   var anyBodyHit = false;
   var relevantMask = 0u;
-  for (var k = 0u; k < dropCount; k = k + 1u) {
-    let sphereInterval = computeRaySphereEntryExit(rayOrigin, rayDirection, drops[k].positionAndRadius.xyz, h);
-    if (sphereInterval.x <= sphereInterval.y) {
+  for (var k = 0u; k < pairCount; k = k + 1u) {
+    let anchorInterval = computeRaySphereEntryExit(rayOrigin, rayDirection, anchors[k].positionAndRadius.xyz, h);
+    if (anchorInterval.x <= anchorInterval.y) {
       anyBodyHit = true;
       relevantMask = relevantMask | (1u << k);
-      clusterNear = min(clusterNear, max(sphereInterval.x, bounds.x));
-      clusterFar = max(clusterFar, min(sphereInterval.y, bounds.y));
+      clusterNear = min(clusterNear, max(anchorInterval.x, bounds.x));
+      clusterFar = max(clusterFar, min(anchorInterval.y, bounds.y));
+    }
+
+    let dripInterval = computeRaySphereEntryExit(rayOrigin, rayDirection, drips[k].positionAndRadius.xyz, h);
+    if (dripInterval.x <= dripInterval.y) {
+      anyBodyHit = true;
+      relevantMask = relevantMask | (1u << (k + pairCount));
+      clusterNear = min(clusterNear, max(dripInterval.x, bounds.x));
+      clusterFar = max(clusterFar, min(dripInterval.y, bounds.y));
     }
   }
   if (!anyBodyHit) {

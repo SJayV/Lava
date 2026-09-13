@@ -1,5 +1,5 @@
 import { SHADER_SOURCE } from '../shaders/raymarchShader.js';
-import { UNIFORM_BUFFER_SIZE } from './parameters.js';
+import { UNIFORM_BUFFER_SIZE } from './constants.js';
 
 // ───── CAMERA CONFIGURATION ─────
 
@@ -51,6 +51,7 @@ export function makeDropRaymarcher(device, presentationFormat) {
     entries: [
       { binding: 0, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
       { binding: 1, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
     ],
   });
 
@@ -79,7 +80,7 @@ export function writeRaymarchUniforms(raymarcher, view) {
   data.set([...view.cameraEye, 0], 12);
   data.set([view.width, view.height, view.aspectRatio, view.focalLength], 16);
   data.set([...view.traceHalfExtents, view.maxRayDistance], 20);
-  data.set([view.h, view.isoLevel, view.fluidDensity, view.dropCount], 24);
+  data.set([view.h, view.isoLevel, view.fluidDensity, view.pairCount], 24);
   data.set([view.minStep, view.maxStep, view.maxTraceSteps, 0], 28);
   data.set([...view.backgroundColor, view.gradientMagnitudeMax], 32);
   data.set([
@@ -91,12 +92,13 @@ export function writeRaymarchUniforms(raymarcher, view) {
   raymarcher.device.queue.writeBuffer(raymarcher.uniformBuffer, 0, data);
 }
 
-export function makeRaymarchBindGroup(raymarcher, dropBuffer) {
+export function makeRaymarchBindGroup(raymarcher, anchorBuffer, dripBuffer) {
   return raymarcher.device.createBindGroup({
     layout: raymarcher.bindGroupLayout,
     entries: [
       { binding: 0, resource: { buffer: raymarcher.uniformBuffer } },
-      { binding: 1, resource: { buffer: dropBuffer } },
+      { binding: 1, resource: { buffer: anchorBuffer } },
+      { binding: 2, resource: { buffer: dripBuffer } },
     ],
   });
 }

@@ -8,10 +8,10 @@ export function getPhaseChunk() {
 
     const LEAD: f32 = 3.0;
     const SIGMA_ATTACHED: f32 = 1.5;
-    const SIGMA_GROWING: f32 = 0.12;
-    const SIGMA_FALLING: f32 = 0.12;
-    const HOLD_MIN: f32 = 4.0;
-    const HOLD_MAX: f32 = 24.5;
+    const SIGMA_GROWING: f32 = 1.5;
+    const SIGMA_FALLING: f32 = 0.92;
+    const HOLD_MIN: f32 = 1.0;
+    const HOLD_MAX: f32 = 14.5;
     const BASE_DRAG: f32 = 9.0;
     const FALLING_DRAG_FACTOR: f32 = 0.0005;
 
@@ -149,7 +149,7 @@ export function getPhaseChunk() {
 
     fn scheduleGrowing(pair: PairState, tNow: f32, separation: f32, h: f32) -> PairState {
       var next = pair;
-      next.phaseCodeAndMus.z = tNow;
+      next.phaseCodeAndMus.z = max(pair.phaseCodeAndMus.z, tNow);
       if (growingShouldExit(separation, h)) {
         return activateFalling(next, tNow);
       }
@@ -158,7 +158,7 @@ export function getPhaseChunk() {
 
     fn scheduleFalling(pair: PairState, tNow: f32, dripY: f32, respawnY: f32) -> PairState {
       var next = pair;
-      next.phaseCodeAndMus.w = tNow;
+      next.phaseCodeAndMus.w = max(pair.phaseCodeAndMus.w, tNow);
       if (fallingShouldExit(dripY, respawnY)) {
         return activateAttached(next, tNow);
       }

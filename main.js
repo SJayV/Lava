@@ -1,10 +1,10 @@
 import { initializeGraphicsContext, makeResourceRegistry, MAIN_TEXTURE_FORMAT, makePostProcessor, resizePostProcessorIfNeeded, getMainTextureView, runPostProcessPass } from './src/gpuSetup.js';
 import { SHADER_SOURCE as BLOOM_SHADER_SOURCE } from './shaders/bloomShader.js';
 import { makeParameterStore, getParameterValue } from './src/parameters.js';
-import { PAIR_COUNT, DROP_COUNT, FLUID_DENSITY, RESPAWN_Y } from './src/constants.js';
+import { PAIR_COUNT, FLUID_DENSITY, RESPAWN_Y, LINE_Y } from './src/constants.js';
 import { CAMERA_EYE, CAMERA_TARGET, CAMERA_UP, FOV_VERTICAL, TRACE_BOUND_MARGIN_IN_H, computeCameraBasisVectors, computeLineSpanWidth, makeDropRaymarcher, writeRaymarchUniforms, makeRaymarchBindGroup, renderRaymarchPass } from './src/renderer.js';
 import { N_LOCAL, ANCHOR_RADIUS_TO_H_RATIO, DRIP_RADIUS_TO_H_RATIO, computeCalibration, makeDripComputePass, writeDripPhysicsUniforms, makeDripComputeBindGroup, runDripComputePass } from './src/simulation.js';
-import { LINE_Y, computeSmoothingRadiusFromLineSpan, computeLineSeedPositions, makeDropRecord, packDropRecords, makeDropState, getCurrentDropBuffer, getDropBufferPair, swapDropState, initializePairState, makePairState, getPairStateBufferPair, swapPairState } from './src/state.js';
+import { computeSmoothingRadiusFromLineSpan, computeLineSeedPositions, makeDropRecord, packDropRecords, makeAnchorState, getAnchorBuffer, makeDripState, getCurrentDripBuffer, getDripBufferPair, swapDripState, initializePairState, makePairState, getPairStateBufferPair, swapPairState } from './src/state.js';
 
 // ───── CONSTANTS ─────
 
@@ -38,41 +38,44 @@ function computeTraceBounds({ lineSpanWidth, h }) {
   };
 }
 
-// ───── HELPER FUNCTIONS - DROP/PAIR SEEDING ─────
+// ───── HELPER FUNCTIONS - SEEDING ─────
 
-function seedDropState(device, registry, { lineSpanWidth, dripRadius, anchorRadius }) {
+function seedAnchorState(device, registry, { lineSpanWidth, anchorRadius }) {
   const seedPositions = computeLineSeedPositions({ ballCount: PAIR_COUNT, lineSpanWidth, lineY: LINE_Y });
-  const drops = seedPositions.flatMap((position) => [
-    makeDropRecord({ position, radius: anchorRadius }),
-    makeDropRecord({ position, radius: dripRadius }),
-  ]);
+  const anchorRecords = seedPositions.map((position) => makeDropRecord({ position, radius: anchorRadius }));
+  return makeAnchorState(device, registry, PAIR_COUNT, anchorRecords);
+}
 
-  const dropState = makeDropState(registry, DROP_COUNT);
-  device.queue.writeBuffer(getCurrentDropBuffer(dropState), 0, packDropRecords(drops));
-  return dropState;
+function seedDripState(device, registry, { lineSpanWidth, dripRadius }) {
+  const seedPositions = computeLineSeedPositions({ ballCount: PAIR_COUNT, lineSpanWidth, lineY: LINE_Y });
+  const dripRecords = seedPositions.map((position) => makeDropRecord({ position, radius: dripRadius }));
+
+  const dripState = makeDripState(registry, PAIR_COUNT);
+  device.queue.writeBuffer(getCurrentDripBuffer(dripState), 0, packDropRecords(dripRecords));
+  return dripState;
 }
 
 function seedPairState(device, registry) {
-  const initialPairStates = Array.from({ length: PAIR_COUNT }, () => initializePairState({ tNow: 0 }));
+  const initialPairStates = Array.from({ length: PAIR_COUNT }, () => initializePairState({ tNow: Math.random() * 10 }));
   return makePairState(device, registry, PAIR_COUNT, initialPairStates);
 }
 
 // ───── HELPER FUNCTIONS - BIND GROUPS ─────
 
-function makeDripBindGroupsByActiveIndex(computePass, dropState, pairState) {
-  const [dropStateA, dropStateB] = getDropBufferPair(dropState);
+function makeDripBindGroupsByActiveIndex(computePass, anchorBuffer, dripState, pairState) {
+  const [dripStateA, dripStateB] = getDripBufferPair(dripState);
   const [pairStateA, pairStateB] = getPairStateBufferPair(pairState);
   return [
-    makeDripComputeBindGroup(computePass, dropStateA, pairStateA, dropStateB, pairStateB),
-    makeDripComputeBindGroup(computePass, dropStateB, pairStateB, dropStateA, pairStateA),
+    makeDripComputeBindGroup(computePass, anchorBuffer, dripStateA, pairStateA, dripStateB, pairStateB),
+    makeDripComputeBindGroup(computePass, anchorBuffer, dripStateB, pairStateB, dripStateA, pairStateA),
   ];
 }
 
-function makeRaymarchBindGroupsByActiveIndex(raymarcher, dropState) {
-  const [dropStateA, dropStateB] = getDropBufferPair(dropState);
+function makeRaymarchBindGroupsByActiveIndex(raymarcher, anchorBuffer, dripState) {
+  const [dripStateA, dripStateB] = getDripBufferPair(dripState);
   return [
-    makeRaymarchBindGroup(raymarcher, dropStateA),
-    makeRaymarchBindGroup(raymarcher, dropStateB),
+    makeRaymarchBindGroup(raymarcher, anchorBuffer, dripStateA),
+    makeRaymarchBindGroup(raymarcher, anchorBuffer, dripStateB),
   ];
 }
 
@@ -82,7 +85,7 @@ async function main() {
   const canvas = document.getElementById('canvas');
   const graphicsContext = await initializeGraphicsContext(canvas);
   const registry = makeResourceRegistry(graphicsContext.device);
-  const parameterStore = makeParameterStore({ simulationTimeScale: 1 });
+  const parameterStore = makeParameterStore({ simulationTimeScale: 0.6 });
 
   const world = computeWorldSetup(canvas);
   const { dripRadius, anchorRadius, isoLevel, gradientMagnitudeMax } = await computeCalibration(graphicsContext.device, {
@@ -94,15 +97,17 @@ async function main() {
   });
   const traceBounds = computeTraceBounds({ lineSpanWidth: world.lineSpanWidth, h: world.h });
 
-  const dropState = seedDropState(graphicsContext.device, registry, { lineSpanWidth: world.lineSpanWidth, dripRadius, anchorRadius });
+  const anchorState = seedAnchorState(graphicsContext.device, registry, { lineSpanWidth: world.lineSpanWidth, anchorRadius });
+  const dripState = seedDripState(graphicsContext.device, registry, { lineSpanWidth: world.lineSpanWidth, dripRadius });
   const pairState = seedPairState(graphicsContext.device, registry);
+  const anchorBuffer = getAnchorBuffer(anchorState);
 
   const raymarcher = makeDropRaymarcher(graphicsContext.device, MAIN_TEXTURE_FORMAT);
   const postProcessor = makePostProcessor(graphicsContext.device, graphicsContext.presentationFormat, BLOOM_SHADER_SOURCE);
   const computePass = makeDripComputePass(graphicsContext.device);
 
-  const computeBindGroupsByActiveIndex = makeDripBindGroupsByActiveIndex(computePass, dropState, pairState);
-  const raymarchBindGroupsByActiveIndex = makeRaymarchBindGroupsByActiveIndex(raymarcher, dropState);
+  const computeBindGroupsByActiveIndex = makeDripBindGroupsByActiveIndex(computePass, anchorBuffer, dripState, pairState);
+  const raymarchBindGroupsByActiveIndex = makeRaymarchBindGroupsByActiveIndex(raymarcher, anchorBuffer, dripState);
 
   let frameCommandEncoder = null;
   let simulationElapsedTime = 0;
@@ -116,14 +121,13 @@ async function main() {
       fluidDensity: FLUID_DENSITY,
       respawnY: RESPAWN_Y,
       baseRadius: dripRadius,
-      anchorBaseRadius: anchorRadius,
-      dropCount: DROP_COUNT,
+      pairCount: PAIR_COUNT,
     });
 
     frameCommandEncoder ??= graphicsContext.device.createCommandEncoder();
-    runDripComputePass(computePass, frameCommandEncoder, computeBindGroupsByActiveIndex[dropState.activeIndex], DROP_COUNT);
+    runDripComputePass(computePass, frameCommandEncoder, computeBindGroupsByActiveIndex[dripState.activeIndex], PAIR_COUNT);
 
-    swapDropState(dropState);
+    swapDripState(dripState);
     swapPairState(pairState);
   }
 
@@ -142,7 +146,7 @@ async function main() {
       h: world.h,
       isoLevel,
       fluidDensity: FLUID_DENSITY,
-      dropCount: DROP_COUNT,
+      pairCount: PAIR_COUNT,
       minStep: MIN_STEP_TO_H_RATIO * world.h,
       maxStep: MAX_STEP_TO_H_RATIO * world.h,
       maxTraceSteps: 20,
@@ -158,7 +162,7 @@ async function main() {
       raymarcher,
       frameCommandEncoder,
       getMainTextureView(postProcessor),
-      raymarchBindGroupsByActiveIndex[dropState.activeIndex],
+      raymarchBindGroupsByActiveIndex[dripState.activeIndex],
     );
     runPostProcessPass(
       postProcessor,
