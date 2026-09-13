@@ -1,6 +1,7 @@
 import { SHADER_SOURCE } from '../shaders/simulationShader.js';
 import { SHADER_SOURCE as CALIBRATION_SHADER_SOURCE } from '../shaders/calibrationShader.js';
 import { UNIFORM_BUFFER_SIZE } from './constants.js';
+import { getDripBufferPair, getPairStateBufferPair, swapDripState, swapPairState } from './state.js';
 
 // ───── SIZING CONSTANTS ─────
 
@@ -59,7 +60,7 @@ export async function computeCalibration(device, { smoothingRadius, dripRadiusRa
 
 // ───── PIPELINE SETUP ─────
 
-export function makeDripComputePass(device) {
+function _initializeDripComputePass(device) {
   const uniformBuffer = device.createBuffer({
     size: UNIFORM_BUFFER_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -87,14 +88,14 @@ export function makeDripComputePass(device) {
 
 // ───── UNIFORMS & COMPUTE PASS ─────
 
-export function writeDripPhysicsUniforms(computePass, view) {
+function _writeDripPhysicsUniforms(computePass, view) {
   const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
   data.set([view.h, view.tNow, view.dt, view.fluidDensity], 0);
   data.set([view.respawnY, view.baseRadius, view.pairCount, 0], 4);
   computePass.device.queue.writeBuffer(computePass.uniformBuffer, 0, data);
 }
 
-export function makeDripComputeBindGroup(computePass, anchorBuffer, currentDripBuffer, currentPairStateBuffer, nextDripBuffer, nextPairStateBuffer) {
+function _initializeDripComputeBindGroup(computePass, anchorBuffer, currentDripBuffer, currentPairStateBuffer, nextDripBuffer, nextPairStateBuffer) {
   return computePass.device.createBindGroup({
     layout: computePass.bindGroupLayout,
     entries: [
@@ -108,10 +109,45 @@ export function makeDripComputeBindGroup(computePass, anchorBuffer, currentDripB
   });
 }
 
-export function runDripComputePass(computePass, commandEncoder, bindGroup, pairCount) {
+function _initializeDripBindGroupsByActiveIndex(computePass, anchorBuffer, dripState, pairState) {
+  const [dripStateA, dripStateB] = getDripBufferPair(dripState);
+  const [pairStateA, pairStateB] = getPairStateBufferPair(pairState);
+  return [
+    _initializeDripComputeBindGroup(computePass, anchorBuffer, dripStateA, pairStateA, dripStateB, pairStateB),
+    _initializeDripComputeBindGroup(computePass, anchorBuffer, dripStateB, pairStateB, dripStateA, pairStateA),
+  ];
+}
+
+function _runDripComputePass(computePass, commandEncoder, bindGroup, pairCount) {
   const pass = commandEncoder.beginComputePass();
   pass.setPipeline(computePass.pipeline);
   pass.setBindGroup(0, bindGroup);
   pass.dispatchWorkgroups(pairCount);
   pass.end();
+}
+
+// ───── PUBLIC INTERFACE ─────
+
+export function initializeDripSimulation(device, anchorBuffer, dripState, pairState, { h, fluidDensity, respawnY, baseRadius, pairCount }) {
+  const computePass = _initializeDripComputePass(device);
+  const bindGroupsByActiveIndex = _initializeDripBindGroupsByActiveIndex(computePass, anchorBuffer, dripState, pairState);
+  return { computePass, bindGroupsByActiveIndex, dripState, pairState, h, fluidDensity, respawnY, baseRadius, pairCount, elapsedTime: 0 };
+}
+
+export function stepDripSimulation(simulation, commandEncoder, dt) {
+  simulation.elapsedTime += dt;
+  _writeDripPhysicsUniforms(simulation.computePass, {
+    h: simulation.h,
+    tNow: simulation.elapsedTime,
+    dt,
+    fluidDensity: simulation.fluidDensity,
+    respawnY: simulation.respawnY,
+    baseRadius: simulation.baseRadius,
+    pairCount: simulation.pairCount,
+  });
+
+  _runDripComputePass(simulation.computePass, commandEncoder, simulation.bindGroupsByActiveIndex[simulation.dripState.activeIndex], simulation.pairCount);
+
+  swapDripState(simulation.dripState);
+  swapPairState(simulation.pairState);
 }

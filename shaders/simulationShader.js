@@ -3,7 +3,6 @@ import { getSimulationChunk } from '../shaderChunks/simulationChunk.js';
 import { getPhaseChunk } from '../shaderChunks/phaseChunk.js';
 
 export const SHADER_SOURCE = /* wgsl */ `
-const GRAVITY: f32 = 5.0;
 const GAMMA: f32 = 2.0;
 const RESPAWN_OVERSHOOT: f32 = 1.5;
 

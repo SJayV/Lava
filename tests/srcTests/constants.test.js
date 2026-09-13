@@ -1,9 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { makeParameterStore, getParameterValue } from '../../src/parameters.js';
+import { initializeParameterStore, getParameterValue } from '../../src/constants.js';
 
 describe('parameterStore', () => {
-  it('seeds values from the initial values object', () => {
-    const store = makeParameterStore({ gravity: 9.8, gamma: 120 });
+  it('takes its values from the initial values object', () => {
+    const store = initializeParameterStore({ gravity: 9.8, gamma: 120 });
 
     expect(getParameterValue(store, 'gravity')).toBe(9.8);
     expect(getParameterValue(store, 'gamma')).toBe(120);
@@ -11,7 +11,7 @@ describe('parameterStore', () => {
 
   it('does not alias the initial values object passed in', () => {
     const initialValues = { gravity: 9.8 };
-    const store = makeParameterStore(initialValues);
+    const store = initializeParameterStore(initialValues);
 
     store.values.gravity = 5;
 

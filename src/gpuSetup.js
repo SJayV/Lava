@@ -44,7 +44,7 @@ export async function initializeGraphicsContext(canvas) {
 
 // ───── RESOURCE REGISTRY ─────
 
-export function makeResourceRegistry(device) {
+export function initializeResourceRegistry(device) {
   return {
     device,
     buffers: new Map(),
@@ -69,7 +69,7 @@ export function getBuffer(registry, name) {
 const BLOOM_DOWNSAMPLE = 2;
 export const MAIN_TEXTURE_FORMAT = 'rgba16float';
 
-function _makeTexture(device, width, height) {
+function _initializeTexture(device, width, height) {
   return device.createTexture({
     size: [width, height],
     format: MAIN_TEXTURE_FORMAT,
@@ -77,7 +77,7 @@ function _makeTexture(device, width, height) {
   });
 }
 
-export function makePostProcessor(device, canvasFormat, shaderSource) {
+export function initializePostProcessor(device, canvasFormat, shaderSource) {
   const uniformBuffer = device.createBuffer({
     size: UNIFORM_BUFFER_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -101,7 +101,7 @@ export function makePostProcessor(device, canvasFormat, shaderSource) {
   });
 
   const shaderModule = device.createShaderModule({ code: shaderSource });
-  function _makePipeline(fragmentEntryPoint, bindGroupLayout, targetFormat) {
+  function _initializePipeline(fragmentEntryPoint, bindGroupLayout, targetFormat) {
     return device.createRenderPipeline({
       layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
       vertex: { module: shaderModule, entryPoint: 'vertexMain' },
@@ -116,9 +116,9 @@ export function makePostProcessor(device, canvasFormat, shaderSource) {
     sampler,
     singleTextureBindGroupLayout,
     dualTextureBindGroupLayout,
-    extractPipeline: _makePipeline('fragmentExtract', singleTextureBindGroupLayout, MAIN_TEXTURE_FORMAT),
-    blurPipeline: _makePipeline('fragmentBlur', singleTextureBindGroupLayout, MAIN_TEXTURE_FORMAT),
-    compositePipeline: _makePipeline('fragmentComposite', dualTextureBindGroupLayout, canvasFormat),
+    extractPipeline: _initializePipeline('fragmentExtract', singleTextureBindGroupLayout, MAIN_TEXTURE_FORMAT),
+    blurPipeline: _initializePipeline('fragmentBlur', singleTextureBindGroupLayout, MAIN_TEXTURE_FORMAT),
+    compositePipeline: _initializePipeline('fragmentComposite', dualTextureBindGroupLayout, canvasFormat),
     width: 0,
     height: 0,
     mainTexture: null,
@@ -132,36 +132,40 @@ export function makePostProcessor(device, canvasFormat, shaderSource) {
   };
 }
 
-function _makeUniformAndSamplerEntries(postProcessor) {
+function _initializeUniformAndSamplerEntries(postProcessor) {
   return [
     { binding: 0, resource: { buffer: postProcessor.uniformBuffer } },
     { binding: 1, resource: postProcessor.sampler },
   ];
 }
 
-function _makeSingleTextureBindGroup(postProcessor, texture) {
+function _initializeSingleTextureBindGroup(postProcessor, texture) {
   return postProcessor.device.createBindGroup({
     layout: postProcessor.singleTextureBindGroupLayout,
     entries: [
-      ..._makeUniformAndSamplerEntries(postProcessor),
+      ..._initializeUniformAndSamplerEntries(postProcessor),
       { binding: 2, resource: texture.createView() },
     ],
   });
 }
 
-function _makeCompositeBindGroup(postProcessor, mainTexture, bloomTexture) {
+function _initializeCompositeBindGroup(postProcessor, mainTexture, bloomTexture) {
   return postProcessor.device.createBindGroup({
     layout: postProcessor.dualTextureBindGroupLayout,
     entries: [
-      ..._makeUniformAndSamplerEntries(postProcessor),
+      ..._initializeUniformAndSamplerEntries(postProcessor),
       { binding: 2, resource: mainTexture.createView() },
       { binding: 3, resource: bloomTexture.createView() },
     ],
   });
 }
 
-export function resizePostProcessorIfNeeded(postProcessor, width, height) {
-  if (postProcessor.width === width && postProcessor.height === height) {
+export function resizeNeeded(postProcessor, width, height) {
+  return postProcessor.width !== width || postProcessor.height !== height;
+}
+
+export function resizePostProcessor(postProcessor, width, height) {
+  if (!resizeNeeded(postProcessor, width, height)) {
     return;
   }
 
@@ -174,15 +178,15 @@ export function resizePostProcessorIfNeeded(postProcessor, width, height) {
 
   postProcessor.width = width;
   postProcessor.height = height;
-  postProcessor.mainTexture = _makeTexture(postProcessor.device, width, height);
-  postProcessor.extractTexture = _makeTexture(postProcessor.device, bloomWidth, bloomHeight);
-  postProcessor.blurATexture = _makeTexture(postProcessor.device, bloomWidth, bloomHeight);
-  postProcessor.blurBTexture = _makeTexture(postProcessor.device, bloomWidth, bloomHeight);
+  postProcessor.mainTexture = _initializeTexture(postProcessor.device, width, height);
+  postProcessor.extractTexture = _initializeTexture(postProcessor.device, bloomWidth, bloomHeight);
+  postProcessor.blurATexture = _initializeTexture(postProcessor.device, bloomWidth, bloomHeight);
+  postProcessor.blurBTexture = _initializeTexture(postProcessor.device, bloomWidth, bloomHeight);
 
-  postProcessor.extractBindGroup = _makeSingleTextureBindGroup(postProcessor, postProcessor.mainTexture);
-  postProcessor.blurHBindGroup = _makeSingleTextureBindGroup(postProcessor, postProcessor.extractTexture);
-  postProcessor.blurVBindGroup = _makeSingleTextureBindGroup(postProcessor, postProcessor.blurATexture);
-  postProcessor.compositeBindGroup = _makeCompositeBindGroup(postProcessor, postProcessor.mainTexture, postProcessor.blurBTexture);
+  postProcessor.extractBindGroup = _initializeSingleTextureBindGroup(postProcessor, postProcessor.mainTexture);
+  postProcessor.blurHBindGroup = _initializeSingleTextureBindGroup(postProcessor, postProcessor.extractTexture);
+  postProcessor.blurVBindGroup = _initializeSingleTextureBindGroup(postProcessor, postProcessor.blurATexture);
+  postProcessor.compositeBindGroup = _initializeCompositeBindGroup(postProcessor, postProcessor.mainTexture, postProcessor.blurBTexture);
 }
 
 export function getMainTextureView(postProcessor) {

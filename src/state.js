@@ -2,7 +2,7 @@ import { registerBuffer, getBuffer } from './gpuSetup.js';
 
 // ───── HELPER FUNCTIONS - PING-PONG BUFFERS ─────
 
-function makePingPongBuffers(registry, baseName, size) {
+function initializePingPongBuffers(registry, baseName, size) {
   const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
   registerBuffer(registry, `${baseName}A`, { size, usage });
   registerBuffer(registry, `${baseName}B`, { size, usage });
@@ -18,7 +18,7 @@ export function computeSmoothingRadiusFromLineSpan({ ballCount, lineSpanWidth, s
   return spacing / spacingToHRatio;
 }
 
-export function computeLineSeedPositions({ ballCount, lineSpanWidth, lineY = 0 }) {
+export function computeLinePositions({ ballCount, lineSpanWidth, lineY = 0 }) {
   const positions = [];
   for (let i = 0; i < ballCount; i += 1) {
     const x = -lineSpanWidth / 2 + (i / (ballCount - 1)) * lineSpanWidth;
@@ -27,7 +27,7 @@ export function computeLineSeedPositions({ ballCount, lineSpanWidth, lineY = 0 }
   return positions;
 }
 
-export function makeDropRecord({ position, radius, velocity = [0, 0, 0] }) {
+export function initializeDropRecord({ position, radius, velocity = [0, 0, 0] }) {
   return { position, radius, velocity };
 }
 
@@ -43,9 +43,12 @@ export function packDropRecords(drops) {
   return packed;
 }
 
-export function makeAnchorState(device, registry, pairCount, anchorRecords) {
+export function initializeAnchorState(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
+  const positions = computeLinePositions({ ballCount, lineSpanWidth, lineY });
+  const anchorRecords = positions.map((position) => initializeDropRecord({ position, radius }));
+
   const usage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
-  registerBuffer(registry, 'anchorState', { size: pairCount * BYTES_PER_DROP, usage });
+  registerBuffer(registry, 'anchorState', { size: ballCount * BYTES_PER_DROP, usage });
   device.queue.writeBuffer(getBuffer(registry, 'anchorState'), 0, packDropRecords(anchorRecords));
   return { registry };
 }
@@ -54,9 +57,14 @@ export function getAnchorBuffer(anchorState) {
   return getBuffer(anchorState.registry, 'anchorState');
 }
 
-export function makeDripState(registry, pairCount) {
-  makePingPongBuffers(registry, 'dripState', pairCount * BYTES_PER_DROP);
-  return { registry, pairCount, activeIndex: 0 };
+export function initializeDripState(device, registry, { ballCount, lineSpanWidth, lineY, radius }) {
+  const positions = computeLinePositions({ ballCount, lineSpanWidth, lineY });
+  const dripRecords = positions.map((position) => initializeDropRecord({ position, radius }));
+
+  initializePingPongBuffers(registry, 'dripState', ballCount * BYTES_PER_DROP);
+  const dripState = { registry, pairCount: ballCount, activeIndex: 0 };
+  device.queue.writeBuffer(getCurrentDripBuffer(dripState), 0, packDropRecords(dripRecords));
+  return dripState;
 }
 
 export function getCurrentDripBuffer(dripState) {
@@ -83,20 +91,22 @@ export function initializePairState({ tNow = 0, startGrowing = false }) {
   return { phaseCode: 0, muAttached: tNow, muGrowing: NEVER_TRIGGERED_MU, muFalling: NEVER_TRIGGERED_MU };
 }
 
-export function makePairStateRecord({ phaseCode, muAttached, muGrowing, muFalling }) {
+export function initializePairStateRecord({ phaseCode, muAttached, muGrowing, muFalling }) {
   return [phaseCode, muAttached, muGrowing, muFalling];
 }
 
 export function packPairStateRecords(records) {
   const packed = new Float32Array(records.length * FLOATS_PER_PAIR_STATE);
   records.forEach((record, index) => {
-    packed.set(makePairStateRecord(record), index * FLOATS_PER_PAIR_STATE);
+    packed.set(initializePairStateRecord(record), index * FLOATS_PER_PAIR_STATE);
   });
   return packed;
 }
 
-export function makePairState(device, registry, pairCount, initialPairStates) {
-  makePingPongBuffers(registry, 'pairState', pairCount * FLOATS_PER_PAIR_STATE * 4);
+export function initializePairStateBuffers(device, registry, pairCount) {
+  const initialPairStates = Array.from({ length: pairCount }, () => initializePairState({ tNow: Math.random() * 20 }));
+
+  initializePingPongBuffers(registry, 'pairState', pairCount * FLOATS_PER_PAIR_STATE * 4);
   device.queue.writeBuffer(getBuffer(registry, 'pairStateA'), 0, packPairStateRecords(initialPairStates));
   return { registry, pairCount, activeIndex: 0 };
 }

@@ -12,6 +12,7 @@ export function getPhaseChunk() {
     const SIGMA_FALLING: f32 = 0.92;
     const HOLD_MIN: f32 = 1.0;
     const HOLD_MAX: f32 = 14.5;
+    const GRAVITY: f32 = 5.0;
     const BASE_DRAG: f32 = 9.0;
     const FALLING_DRAG_FACTOR: f32 = 0.0005;
 

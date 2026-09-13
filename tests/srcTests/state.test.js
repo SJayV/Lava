@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import {
-  computeLineSeedPositions,
+  computeLinePositions,
   computeSmoothingRadiusFromLineSpan,
-  makeDropRecord,
+  initializeDropRecord,
   packDropRecords,
   initializePairState,
-  makePairStateRecord,
+  initializePairStateRecord,
   packPairStateRecords,
 } from '../../src/state.js';
 
@@ -42,23 +42,23 @@ describe('computeSmoothingRadiusFromLineSpan', () => {
   });
 });
 
-describe('computeLineSeedPositions', () => {
+describe('computeLinePositions', () => {
   it('places the requested number of positions', () => {
-    const positions = computeLineSeedPositions({ ballCount: 5, lineSpanWidth: 4 });
+    const positions = computeLinePositions({ ballCount: 5, lineSpanWidth: 4 });
 
     expect(positions).toHaveLength(5);
   });
 
   it('evenly spans exactly [-lineSpanWidth/2, lineSpanWidth/2]', () => {
     const lineSpanWidth = 4;
-    const positions = computeLineSeedPositions({ ballCount: 5, lineSpanWidth });
+    const positions = computeLinePositions({ ballCount: 5, lineSpanWidth });
 
     expect(positions[0][0]).toBeCloseTo(-lineSpanWidth / 2);
     expect(positions[positions.length - 1][0]).toBeCloseTo(lineSpanWidth / 2);
   });
 
   it('spaces adjacent positions equally', () => {
-    const positions = computeLineSeedPositions({ ballCount: 5, lineSpanWidth: 4 });
+    const positions = computeLinePositions({ ballCount: 5, lineSpanWidth: 4 });
 
     const gaps = [];
     for (let i = 1; i < positions.length; i += 1) {
@@ -70,7 +70,7 @@ describe('computeLineSeedPositions', () => {
   });
 
   it('places every position on the y = 0, z = 0 line by default', () => {
-    const positions = computeLineSeedPositions({ ballCount: 3, lineSpanWidth: 2 });
+    const positions = computeLinePositions({ ballCount: 3, lineSpanWidth: 2 });
 
     for (const [, y, z] of positions) {
       expect(y).toBe(0);
@@ -79,7 +79,7 @@ describe('computeLineSeedPositions', () => {
   });
 
   it('places every position at the given lineY, still on z = 0', () => {
-    const positions = computeLineSeedPositions({ ballCount: 3, lineSpanWidth: 2, lineY: 0.5 });
+    const positions = computeLinePositions({ ballCount: 3, lineSpanWidth: 2, lineY: 0.5 });
 
     for (const [, y, z] of positions) {
       expect(y).toBe(0.5);
@@ -88,9 +88,9 @@ describe('computeLineSeedPositions', () => {
   });
 });
 
-describe('makeDropRecord', () => {
-  it('seeds a drop at rest: zero velocity, given position and radius', () => {
-    const drop = makeDropRecord({ position: [1, 2, 3], radius: 0.1 });
+describe('initializeDropRecord', () => {
+  it('creates a drop at rest: zero velocity, given position and radius', () => {
+    const drop = initializeDropRecord({ position: [1, 2, 3], radius: 0.1 });
 
     expect(drop.position).toEqual([1, 2, 3]);
     expect(drop.radius).toBe(0.1);
@@ -100,7 +100,7 @@ describe('makeDropRecord', () => {
 
 describe('packDropRecords', () => {
   it('packs each drop into 8 floats: position, radius, velocity, speed', () => {
-    const drops = [makeDropRecord({ position: [1, 2, 3], radius: 0.5 })];
+    const drops = [initializeDropRecord({ position: [1, 2, 3], radius: 0.5 })];
 
     const packed = packDropRecords(drops);
 
@@ -111,8 +111,8 @@ describe('packDropRecords', () => {
 
   it('packs multiple drops back to back in order', () => {
     const drops = [
-      makeDropRecord({ position: [0, 0, 0], radius: 0.1 }),
-      makeDropRecord({ position: [1, 0, 0], radius: 0.2 }),
+      initializeDropRecord({ position: [0, 0, 0], radius: 0.1 }),
+      initializeDropRecord({ position: [1, 0, 0], radius: 0.2 }),
     ];
 
     const packed = packDropRecords(drops);
@@ -134,28 +134,28 @@ describe('packDropRecords', () => {
 // ───── PAIR STATE ─────
 
 describe('initializePairState', () => {
-  it('seeds a resting pair as ATTACHED (phaseCode 0), muAttached at tNow', () => {
+  it('creates a resting pair as ATTACHED (phaseCode 0), muAttached at tNow', () => {
     const state = initializePairState({ tNow: 5 });
 
     expect(state.phaseCode).toBe(0);
     expect(state.muAttached).toBe(5);
   });
 
-  it('seeds a resting pair with muGrowing/muFalling as never-triggered sentinels, not a pre-computed gap', () => {
+  it('creates a resting pair with muGrowing/muFalling as never-triggered sentinels, not a pre-computed gap', () => {
     const state = initializePairState({ tNow: 5 });
 
     expect(state.muGrowing).toBeLessThan(-1e6);
     expect(state.muFalling).toBeLessThan(-1e6);
   });
 
-  it('seeds a pre-activated pair as GROWING (phaseCode 1), muGrowing at tNow', () => {
+  it('creates a pre-activated pair as GROWING (phaseCode 1), muGrowing at tNow', () => {
     const state = initializePairState({ tNow: 5, startGrowing: true });
 
     expect(state.phaseCode).toBe(1);
     expect(state.muGrowing).toBe(5);
   });
 
-  it('seeds a pre-activated pair with muAttached/muFalling as never-triggered sentinels', () => {
+  it('creates a pre-activated pair with muAttached/muFalling as never-triggered sentinels', () => {
     const state = initializePairState({ tNow: 5, startGrowing: true });
 
     expect(state.muAttached).toBeLessThan(-1e6);
@@ -163,9 +163,9 @@ describe('initializePairState', () => {
   });
 });
 
-describe('makePairStateRecord / packPairStateRecords', () => {
+describe('initializePairStateRecord / packPairStateRecords', () => {
   it('packs phase code and the three mu values in order', () => {
-    const record = makePairStateRecord({ phaseCode: 1, muAttached: 1, muGrowing: 2, muFalling: 3 });
+    const record = initializePairStateRecord({ phaseCode: 1, muAttached: 1, muGrowing: 2, muFalling: 3 });
 
     expect(record).toEqual([1, 1, 2, 3]);
   });

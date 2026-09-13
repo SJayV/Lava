@@ -1,5 +1,6 @@
 import { SHADER_SOURCE } from '../shaders/raymarchShader.js';
 import { UNIFORM_BUFFER_SIZE } from './constants.js';
+import { getDripBufferPair } from './state.js';
 
 // ───── CAMERA CONFIGURATION ─────
 
@@ -41,7 +42,7 @@ export function computeLineSpanWidth({ eyeDistance, fovVertical, aspectRatio }) 
 
 // ───── PIPELINE SETUP ─────
 
-export function makeDropRaymarcher(device, presentationFormat) {
+function _initializeDropRaymarcher(device, presentationFormat) {
   const uniformBuffer = device.createBuffer({
     size: UNIFORM_BUFFER_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -72,7 +73,7 @@ const DEFAULT_NOISE_SCALE = 9;
 const DEFAULT_NOISE_SPEED = 0.5;
 const DEFAULT_NOISE_OCTAVES = 4;
 
-export function writeRaymarchUniforms(raymarcher, view) {
+function _writeRaymarchUniforms(raymarcher, view) {
   const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
   data.set([...view.cameraRight, 0], 0);
   data.set([...view.cameraUp, 0], 4);
@@ -92,7 +93,7 @@ export function writeRaymarchUniforms(raymarcher, view) {
   raymarcher.device.queue.writeBuffer(raymarcher.uniformBuffer, 0, data);
 }
 
-export function makeRaymarchBindGroup(raymarcher, anchorBuffer, dripBuffer) {
+function _initializeRaymarchBindGroup(raymarcher, anchorBuffer, dripBuffer) {
   return raymarcher.device.createBindGroup({
     layout: raymarcher.bindGroupLayout,
     entries: [
@@ -103,7 +104,15 @@ export function makeRaymarchBindGroup(raymarcher, anchorBuffer, dripBuffer) {
   });
 }
 
-export function renderRaymarchPass(raymarcher, commandEncoder, colorTextureView, bindGroup) {
+function _initializeRaymarchBindGroupsByActiveIndex(raymarcher, anchorBuffer, dripState) {
+  const [dripStateA, dripStateB] = getDripBufferPair(dripState);
+  return [
+    _initializeRaymarchBindGroup(raymarcher, anchorBuffer, dripStateA),
+    _initializeRaymarchBindGroup(raymarcher, anchorBuffer, dripStateB),
+  ];
+}
+
+function _renderRaymarchPass(raymarcher, commandEncoder, colorTextureView, bindGroup) {
   const pass = commandEncoder.beginRenderPass({
     colorAttachments: [{ view: colorTextureView, loadOp: 'clear', storeOp: 'store' }],
   });
@@ -111,4 +120,39 @@ export function renderRaymarchPass(raymarcher, commandEncoder, colorTextureView,
   pass.setBindGroup(0, bindGroup);
   pass.draw(3);
   pass.end();
+}
+
+// ───── PUBLIC INTERFACE ─────
+
+export function initializeSceneRenderer(device, presentationFormat, anchorBuffer, dripState, view) {
+  const raymarcher = _initializeDropRaymarcher(device, presentationFormat);
+  const bindGroupsByActiveIndex = _initializeRaymarchBindGroupsByActiveIndex(raymarcher, anchorBuffer, dripState);
+  return { raymarcher, bindGroupsByActiveIndex, dripState, ...view };
+}
+
+export function renderScene(sceneRenderer, commandEncoder, colorTextureView, { width, height, animationTime }) {
+  _writeRaymarchUniforms(sceneRenderer.raymarcher, {
+    cameraRight: sceneRenderer.cameraBasis.rightAxis,
+    cameraUp: sceneRenderer.cameraBasis.trueUpAxis,
+    cameraForward: sceneRenderer.cameraBasis.forwardAxis,
+    cameraEye: CAMERA_EYE,
+    width,
+    height,
+    aspectRatio: sceneRenderer.aspectRatio,
+    focalLength: sceneRenderer.focalLength,
+    traceHalfExtents: sceneRenderer.traceHalfExtents,
+    maxRayDistance: sceneRenderer.maxRayDistance,
+    h: sceneRenderer.h,
+    isoLevel: sceneRenderer.isoLevel,
+    fluidDensity: sceneRenderer.fluidDensity,
+    pairCount: sceneRenderer.pairCount,
+    minStep: sceneRenderer.minStep,
+    maxStep: sceneRenderer.maxStep,
+    maxTraceSteps: sceneRenderer.maxTraceSteps,
+    backgroundColor: sceneRenderer.backgroundColor,
+    gradientMagnitudeMax: sceneRenderer.gradientMagnitudeMax,
+    animationTime,
+  });
+
+  _renderRaymarchPass(sceneRenderer.raymarcher, commandEncoder, colorTextureView, sceneRenderer.bindGroupsByActiveIndex[sceneRenderer.dripState.activeIndex]);
 }
