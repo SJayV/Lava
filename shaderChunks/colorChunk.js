@@ -3,7 +3,7 @@ const ORANGE = [0.8, 0.35, 0.07];
 const RED = [0.7, 0.15, 0.05];
 
 export function getColorChunk() {
-  return /* wgsl */ `
+  return `
     fn computeTemperatureColor(heatValue: f32) -> vec3<f32> {
       let yellow = vec3<f32>(${YELLOW.join(', ')});
       let orange = vec3<f32>(${ORANGE.join(', ')});

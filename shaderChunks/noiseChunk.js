@@ -3,14 +3,20 @@ const HASH_PRIME_Y = 668265263;
 const HASH_PRIME_Z = 2147483647;
 const HASH_MIX_A = 1274126177;
 
-export function getNoiseChunk() {
-  return /* wgsl */ `
+export function getHashChunk() {
+  return `
     fn hashLattice3D(x: i32, y: i32, z: i32) -> f32 {
       var h = bitcast<u32>(x * ${HASH_PRIME_X} + y * ${HASH_PRIME_Y} + z * ${HASH_PRIME_Z});
       h = (h ^ (h >> 13u)) * ${HASH_MIX_A}u;
       h = h ^ (h >> 16u);
       return f32(h) / 4294967295.0;
     }
+  `;
+}
+
+export function getNoiseChunk() {
+  return `
+    ${getHashChunk()}
 
     fn hashGradient3D(x: i32, y: i32, z: i32) -> vec3<f32> {
       let theta = hashLattice3D(x, y, z) * 6.28318530718;
@@ -19,12 +25,22 @@ export function getNoiseChunk() {
       return vec3<f32>(sinPhi * cos(theta), sinPhi * sin(theta), cosPhi);
     }
 
-    fn computeGradientNoise3D(position: vec3<f32>) -> f32 {
+    struct LatticeCell {
+      base: vec3<i32>,
+      frac: vec3<f32>,
+    }
+
+    fn initializeLatticeCell(position: vec3<f32>) -> LatticeCell {
       let base = floor(position);
-      let f = position - base;
-      let x0 = i32(base.x);
-      let y0 = i32(base.y);
-      let z0 = i32(base.z);
+      return LatticeCell(vec3<i32>(base), position - base);
+    }
+
+    fn computeGradientNoise3D(position: vec3<f32>) -> f32 {
+      let cell = initializeLatticeCell(position);
+      let x0 = cell.base.x;
+      let y0 = cell.base.y;
+      let z0 = cell.base.z;
+      let f = cell.frac;
       let u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
 
       let n000 = dot(hashGradient3D(x0, y0, z0), f - vec3<f32>(0.0, 0.0, 0.0));
@@ -46,11 +62,11 @@ export function getNoiseChunk() {
     }
 
     fn computeValueNoise3D(position: vec3<f32>) -> f32 {
-      let base = floor(position);
-      let t = position - base;
-      let x0 = i32(base.x);
-      let y0 = i32(base.y);
-      let z0 = i32(base.z);
+      let cell = initializeLatticeCell(position);
+      let x0 = cell.base.x;
+      let y0 = cell.base.y;
+      let z0 = cell.base.z;
+      let t = cell.frac;
 
       let x00 = mix(hashLattice3D(x0, y0, z0), hashLattice3D(x0 + 1, y0, z0), t.x);
       let x10 = mix(hashLattice3D(x0, y0 + 1, z0), hashLattice3D(x0 + 1, y0 + 1, z0), t.x);

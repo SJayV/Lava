@@ -1,11 +1,8 @@
 const COHESION_NORMALIZATION = 32 / Math.PI;
 
 export function getSimulationChunk() {
-  return /* wgsl */ `
+  return `
     fn computeCohesionKernel(distance: f32, smoothingRadius: f32) -> f32 {
-      if (distance <= 0.0 || distance > smoothingRadius) {
-        return 0.0;
-      }
       let h6 = pow(smoothingRadius, 6.0);
       let nearTerm = pow(smoothingRadius - distance, 3.0) * pow(distance, 3.0);
       var value = nearTerm;

@@ -5,6 +5,9 @@ import { getPhaseChunk } from '../shaderChunks/phaseChunk.js';
 export const SHADER_SOURCE = /* wgsl */ `
 const GAMMA: f32 = 2.0;
 const RESPAWN_OVERSHOOT: f32 = 1.5;
+const GRAVITY: f32 = 5.0;
+const BASE_DRAG: f32 = 9.0;
+const FALLING_DRAG_FACTOR: f32 = 0.0005;
 
 struct DripUniforms {
   hTNowDtFluidDensity: vec4<f32>,
@@ -27,6 +30,84 @@ ${getParticleMassChunk()}
 ${getSimulationChunk()}
 ${getPhaseChunk()}
 
+// ───── PHASE SCHEDULER: EXIT PREDICATES + ACTIVATION ─────
+
+fn attachedShouldExit(pair: PairState, tNow: f32, pairIndex: u32) -> bool {
+  let muAttached = getMus(pair).x;
+  let gap = computeAttachedGrowingGap(pairIndex, muAttached);
+  return tNow >= muAttached + gap;
+}
+
+fn growingShouldExit(separation: f32, h: f32) -> bool {
+  return separation > h;
+}
+
+fn fallingShouldExit(dripY: f32, respawnY: f32) -> bool {
+  return dripY < respawnY;
+}
+
+fn activateGrowing(pair: PairState, tNow: f32) -> PairState {
+  var next = pair;
+  next.phaseCodeAndMus.y = computeBumpDeactivationMu(tNow, SIGMA_ATTACHED);
+  next.phaseCodeAndMus.z = computeBumpActivationMu(tNow, SIGMA_GROWING);
+  next.phaseCodeAndMus.x = PHASE_GROWING;
+  return next;
+}
+
+fn activateFalling(pair: PairState, tNow: f32) -> PairState {
+  var next = pair;
+  next.phaseCodeAndMus.z = computeBumpDeactivationMu(tNow, SIGMA_GROWING);
+  next.phaseCodeAndMus.w = computeBumpActivationMu(tNow, SIGMA_FALLING);
+  next.phaseCodeAndMus.x = PHASE_FALLING;
+  return next;
+}
+
+fn activateAttached(pair: PairState, tNow: f32) -> PairState {
+  var next = pair;
+  next.phaseCodeAndMus.w = computeBumpDeactivationMu(tNow, SIGMA_FALLING);
+  next.phaseCodeAndMus.y = computeBumpActivationMu(tNow, SIGMA_ATTACHED);
+  next.phaseCodeAndMus.x = PHASE_ATTACHED;
+  return next;
+}
+
+// ───── PHASE SCHEDULER: DISPATCHER + PER-PHASE HANDLERS ─────
+
+fn scheduleAttached(pair: PairState, tNow: f32, pairIndex: u32) -> PairState {
+  if (attachedShouldExit(pair, tNow, pairIndex)) {
+    return activateGrowing(pair, tNow);
+  }
+  return pair;
+}
+
+fn scheduleGrowing(pair: PairState, tNow: f32, separation: f32, h: f32) -> PairState {
+  var next = pair;
+  next.phaseCodeAndMus.z = max(pair.phaseCodeAndMus.z, tNow);
+  if (growingShouldExit(separation, h)) {
+    return activateFalling(next, tNow);
+  }
+  return next;
+}
+
+fn scheduleFalling(pair: PairState, tNow: f32, dripY: f32, respawnY: f32) -> PairState {
+  var next = pair;
+  next.phaseCodeAndMus.w = max(pair.phaseCodeAndMus.w, tNow);
+  if (fallingShouldExit(dripY, respawnY)) {
+    return activateAttached(next, tNow);
+  }
+  return next;
+}
+
+fn scheduleTick(pair: PairState, tNow: f32, separation: f32, dripY: f32, h: f32, respawnY: f32, pairIndex: u32) -> PairState {
+  let phaseCode = getPhaseCode(pair);
+  if (phaseCode == PHASE_ATTACHED) {
+    return scheduleAttached(pair, tNow, pairIndex);
+  } else if (phaseCode == PHASE_GROWING) {
+    return scheduleGrowing(pair, tNow, separation, h);
+  } else {
+    return scheduleFalling(pair, tNow, dripY, respawnY);
+  }
+}
+
 @compute @workgroup_size(1)
 fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
   let h = uniforms.hTNowDtFluidDensity.x;
@@ -47,8 +128,8 @@ fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
 
   // ───── DISPATCHER, WEIGHTS, BLENDING ─────
   let weights = computePhaseWeights(pair, tNow, 1e-6);
-  let gravity = blendPhaseValue(weights, getAttachedGravity(), getGrowingGravity(), getFallingGravity());
-  let drag = blendPhaseValue(weights, getAttachedDrag(), getGrowingDrag(), getFallingDrag());
+  let gravity = blendPhaseValue(weights, 0.0, GRAVITY, GRAVITY);
+  let drag = blendPhaseValue(weights, BASE_DRAG, BASE_DRAG, BASE_DRAG * FALLING_DRAG_FACTOR);
 
   // ───── FORCES ─────
   let myPosition = currentDrips[i].positionAndRadius.xyz;

@@ -20,10 +20,6 @@ fn computeIsoLevelCalibrationFactor(radiusRatio: f32) -> f32 {
   return pow(1.0 - radiusRatio * radiusRatio, 3.0);
 }
 
-fn computeRadiusFromMass(mass: f32, fluidDensity: f32) -> f32 {
-  return pow(mass / ((4.0 / 3.0) * ${Math.PI} * fluidDensity), 1.0 / 3.0);
-}
-
 @compute @workgroup_size(1)
 fn computeMain() {
   let h = uniforms.hRatiosFluidDensity.x;
@@ -39,7 +35,7 @@ fn computeMain() {
   let isoLevel = computeIsoLevelCalibrationFactor(dripRadiusRatio) * dripMass * peakDensity;
 
   let anchorMass = isoLevel / (computeIsoLevelCalibrationFactor(anchorRadiusRatio) * peakDensity);
-  let anchorRadius = computeRadiusFromMass(anchorMass, fluidDensity);
+  let anchorRadius = computeParticleRadius(anchorMass, fluidDensity);
 
   const GRADIENT_COEFFICIENT: f32 = 2.7;
   let gradientMagnitudeMax = nLocal * anchorMass * (GRADIENT_COEFFICIENT / pow(h, 4.0));

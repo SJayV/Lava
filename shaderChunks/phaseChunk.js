@@ -1,8 +1,8 @@
-import { getNoiseChunk } from './noiseChunk.js';
+import { getHashChunk } from './noiseChunk.js';
 
 export function getPhaseChunk() {
-  return /* wgsl */ `
-    ${getNoiseChunk()}
+  return `
+    ${getHashChunk()}
 
     // ───── CONSTANTS ─────
 
@@ -12,9 +12,6 @@ export function getPhaseChunk() {
     const SIGMA_FALLING: f32 = 0.92;
     const HOLD_MIN: f32 = 1.0;
     const HOLD_MAX: f32 = 14.5;
-    const GRAVITY: f32 = 5.0;
-    const BASE_DRAG: f32 = 9.0;
-    const FALLING_DRAG_FACTOR: f32 = 0.0005;
 
     const PHASE_ATTACHED: f32 = 0.0;
     const PHASE_GROWING: f32 = 1.0;
@@ -40,7 +37,7 @@ export function getPhaseChunk() {
       return pair.phaseCodeAndMus.yzw;
     }
 
-    // ───── GAUSSIAN BUMP, WEIGHTS, BLENDING ─────
+    // ───── GAUSSIAN WEIGHTING ─────
 
     fn computeGaussianBump(mu: f32, tNow: f32, sigma: f32) -> f32 {
       let d = tNow - mu;
@@ -71,110 +68,6 @@ export function getPhaseChunk() {
 
     fn blendPhaseValue(weights: PhaseWeights, valueAttached: f32, valueGrowing: f32, valueFalling: f32) -> f32 {
       return valueAttached * weights.wAttached + valueGrowing * weights.wGrowing + valueFalling * weights.wFalling;
-    }
-
-    // ───── PER-PHASE PARAMETER VALUES ─────
-
-    fn getAttachedGravity() -> f32 {
-      return 0.0;
-    }
-
-    fn getGrowingGravity() -> f32 {
-      return GRAVITY;
-    }
-
-    fn getFallingGravity() -> f32 {
-      return GRAVITY;
-    }
-
-    fn getAttachedDrag() -> f32 {
-      return BASE_DRAG;
-    }
-
-    fn getGrowingDrag() -> f32 {
-      return BASE_DRAG;
-    }
-
-    fn getFallingDrag() -> f32 {
-      return BASE_DRAG * FALLING_DRAG_FACTOR;
-    }
-
-    // ───── SCHEDULER: EXIT PREDICATES + ACTIVATION ─────
-
-    fn attachedShouldExit(pair: PairState, tNow: f32, pairIndex: u32) -> bool {
-      let muAttached = getMus(pair).x;
-      let gap = computeAttachedGrowingGap(pairIndex, muAttached);
-      return tNow >= muAttached + gap;
-    }
-
-    fn growingShouldExit(separation: f32, h: f32) -> bool {
-      return separation > h;
-    }
-
-    fn fallingShouldExit(dripY: f32, respawnY: f32) -> bool {
-      return dripY < respawnY;
-    }
-
-    fn activateGrowing(pair: PairState, tNow: f32) -> PairState {
-      var next = pair;
-      next.phaseCodeAndMus.y = computeBumpDeactivationMu(tNow, SIGMA_ATTACHED);
-      next.phaseCodeAndMus.z = computeBumpActivationMu(tNow, SIGMA_GROWING);
-      next.phaseCodeAndMus.x = PHASE_GROWING;
-      return next;
-    }
-
-    fn activateFalling(pair: PairState, tNow: f32) -> PairState {
-      var next = pair;
-      next.phaseCodeAndMus.z = computeBumpDeactivationMu(tNow, SIGMA_GROWING);
-      next.phaseCodeAndMus.w = computeBumpActivationMu(tNow, SIGMA_FALLING);
-      next.phaseCodeAndMus.x = PHASE_FALLING;
-      return next;
-    }
-
-    fn activateAttached(pair: PairState, tNow: f32) -> PairState {
-      var next = pair;
-      next.phaseCodeAndMus.w = computeBumpDeactivationMu(tNow, SIGMA_FALLING);
-      next.phaseCodeAndMus.y = computeBumpActivationMu(tNow, SIGMA_ATTACHED);
-      next.phaseCodeAndMus.x = PHASE_ATTACHED;
-      return next;
-    }
-
-    // ───── SCHEDULER: DISPATCHER + PER-PHASE HANDLERS ─────
-
-    fn scheduleAttached(pair: PairState, tNow: f32, pairIndex: u32) -> PairState {
-      if (attachedShouldExit(pair, tNow, pairIndex)) {
-        return activateGrowing(pair, tNow);
-      }
-      return pair;
-    }
-
-    fn scheduleGrowing(pair: PairState, tNow: f32, separation: f32, h: f32) -> PairState {
-      var next = pair;
-      next.phaseCodeAndMus.z = max(pair.phaseCodeAndMus.z, tNow);
-      if (growingShouldExit(separation, h)) {
-        return activateFalling(next, tNow);
-      }
-      return next;
-    }
-
-    fn scheduleFalling(pair: PairState, tNow: f32, dripY: f32, respawnY: f32) -> PairState {
-      var next = pair;
-      next.phaseCodeAndMus.w = max(pair.phaseCodeAndMus.w, tNow);
-      if (fallingShouldExit(dripY, respawnY)) {
-        return activateAttached(next, tNow);
-      }
-      return next;
-    }
-
-    fn scheduleTick(pair: PairState, tNow: f32, separation: f32, dripY: f32, h: f32, respawnY: f32, pairIndex: u32) -> PairState {
-      let phaseCode = getPhaseCode(pair);
-      if (phaseCode == PHASE_ATTACHED) {
-        return scheduleAttached(pair, tNow, pairIndex);
-      } else if (phaseCode == PHASE_GROWING) {
-        return scheduleGrowing(pair, tNow, separation, h);
-      } else {
-        return scheduleFalling(pair, tNow, dripY, respawnY);
-      }
     }
   `;
 }

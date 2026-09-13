@@ -118,3 +118,12 @@ export function getPairStateBufferPair(pairState) {
 export function swapPairState(pairState) {
   pairState.activeIndex = 1 - pairState.activeIndex;
 }
+
+// ───── PUBLIC INTERFACE ─────
+
+export function initializeSceneState(device, registry, { pairCount, lineSpanWidth, lineY, anchorRadius, dripRadius }) {
+  const anchorState = initializeAnchorState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: anchorRadius });
+  const dripState = initializeDripState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: dripRadius });
+  const pairState = initializePairStateBuffers(device, registry, pairCount);
+  return { anchorBuffer: getAnchorBuffer(anchorState), dripState, pairState };
+}

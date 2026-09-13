@@ -1,9 +1,10 @@
-export const POLY6_NORMALIZATION = 315 / (64 * Math.PI);
+const POLY6_NORMALIZATION = 315 / (64 * Math.PI);
+const MASS_VOLUME_COEFFICIENT = (4 / 3) * Math.PI;
 
 export function getDensityKernelChunk() {
-  return /* wgsl */ `
+  return `
     fn computeDensityKernel(distance: f32, smoothingRadius: f32) -> f32 {
-      if (distance < 0.0 || distance >= smoothingRadius) {
+      if (distance >= smoothingRadius) {
         return 0.0;
       }
       let term = smoothingRadius * smoothingRadius - distance * distance;
@@ -13,9 +14,13 @@ export function getDensityKernelChunk() {
 }
 
 export function getParticleMassChunk() {
-  return /* wgsl */ `
+  return `
     fn computeParticleMass(radius: f32, fluidDensity: f32) -> f32 {
-      return (4.0 / 3.0) * ${Math.PI} * radius * radius * radius * fluidDensity;
+      return ${MASS_VOLUME_COEFFICIENT} * radius * radius * radius * fluidDensity;
+    }
+
+    fn computeParticleRadius(mass: f32, fluidDensity: f32) -> f32 {
+      return pow(mass / (${MASS_VOLUME_COEFFICIENT} * fluidDensity), 1.0 / 3.0);
     }
   `;
 }
