@@ -2,13 +2,7 @@ import { getParticleMassChunk } from '../shaderChunks/shapeChunk.js';
 import { getSimulationChunk } from '../shaderChunks/simulationChunk.js';
 import { getPhaseChunk } from '../shaderChunks/phaseChunk.js';
 
-export const SHADER_SOURCE = /* wgsl */ `
-const GAMMA: f32 = 2.0;
-const RESPAWN_OVERSHOOT: f32 = 1.5;
-const GRAVITY: f32 = 5.0;
-const BASE_DRAG: f32 = 9.0;
-const FALLING_DRAG_FACTOR: f32 = 0.0005;
-
+export const SHADER_SOURCE = `
 struct DripUniforms {
   hTNowDtFluidDensity: vec4<f32>,
   respawnYBaseRadiusPairCount: vec4<f32>,
@@ -30,7 +24,7 @@ ${getParticleMassChunk()}
 ${getSimulationChunk()}
 ${getPhaseChunk()}
 
-// ───── PHASE SCHEDULER: EXIT PREDICATES + ACTIVATION ─────
+// ───── DISPATCHER ─────
 
 fn attachedShouldExit(pair: PairState, tNow: f32, pairIndex: u32) -> bool {
   let muAttached = getMus(pair).x;
@@ -70,13 +64,14 @@ fn activateAttached(pair: PairState, tNow: f32) -> PairState {
   return next;
 }
 
-// ───── PHASE SCHEDULER: DISPATCHER + PER-PHASE HANDLERS ─────
+// ───── SCHEDULER ─────
 
 fn scheduleAttached(pair: PairState, tNow: f32, pairIndex: u32) -> PairState {
+  var next = pair;
   if (attachedShouldExit(pair, tNow, pairIndex)) {
-    return activateGrowing(pair, tNow);
+    return activateGrowing(next, tNow);
   }
-  return pair;
+  return next;
 }
 
 fn scheduleGrowing(pair: PairState, tNow: f32, separation: f32, h: f32) -> PairState {
@@ -101,15 +96,80 @@ fn scheduleTick(pair: PairState, tNow: f32, separation: f32, dripY: f32, h: f32,
   let phaseCode = getPhaseCode(pair);
   if (phaseCode == PHASE_ATTACHED) {
     return scheduleAttached(pair, tNow, pairIndex);
-  } else if (phaseCode == PHASE_GROWING) {
+  }
+  if (phaseCode == PHASE_GROWING) {
     return scheduleGrowing(pair, tNow, separation, h);
   } else {
     return scheduleFalling(pair, tNow, dripY, respawnY);
   }
 }
 
+// ───── HELPER FUNCTIONS - PHASE BLENDING ─────
+
+struct PhaseBlend {
+  gravity: f32,
+  drag: f32,
+}
+
+fn computePhaseBlend(pair: PairState, tNow: f32) -> PhaseBlend {
+  const GRAVITY: f32 = 5.0;
+  const BASE_DRAG: f32 = 9.0;
+  const FALLING_DRAG_FACTOR: f32 = 0.0005;
+  let weights = computePhaseWeights(pair, tNow, 1e-6);
+  let gravity = blendPhaseValue(weights, 0.0, GRAVITY, GRAVITY);
+  let drag = blendPhaseValue(weights, BASE_DRAG, BASE_DRAG, BASE_DRAG * FALLING_DRAG_FACTOR);
+  return PhaseBlend(gravity, drag);
+}
+
+// ───── HELPER FUNCTIONS - FORCES ─────
+
+fn computeNetAcceleration(myPosition: vec3<f32>, anchorPosition: vec3<f32>, myMass: f32, anchorMass: f32, integrationMass: f32, gravity: f32, h: f32) -> vec3<f32> {
+  const GAMMA: f32 = 2.0;
+  let force = computeCohesionForce(myPosition, anchorPosition, myMass, anchorMass, GAMMA, h);
+  return computeAcceleration(force, integrationMass, gravity);
+}
+
+// ───── HELPER FUNCTIONS - INTEGRATION ─────
+
+fn computeAcceleration(force: vec3<f32>, integrationMass: f32, gravity: f32) -> vec3<f32> {
+  return force / integrationMass + vec3<f32>(0.0, -gravity, 0.0);
+}
+
+fn integrateVelocity(oldVelocity: vec3<f32>, acceleration: vec3<f32>, drag: f32, dt: f32) -> vec3<f32> {
+  return oldVelocity * (1.0 - drag * dt) + acceleration * dt;
+}
+
+fn integratePosition(oldPosition: vec3<f32>, velocity: vec3<f32>, dt: f32) -> vec3<f32> {
+  return oldPosition + velocity * dt;
+}
+
+// ───── HELPER FUNCTIONS - RESPAWN ─────
+
+fn justRespawned(nextPair: PairState, pair: PairState) -> bool {
+  return getPhaseCode(nextPair) == PHASE_ATTACHED && getPhaseCode(pair) == PHASE_FALLING;
+}
+
+fn computeRespawnPosition(anchorPosition: vec3<f32>) -> vec3<f32> {
+  const RESPAWN_OVERSHOOT: f32 = 1.5;
+  return anchorPosition + vec3<f32>(0.0, RESPAWN_OVERSHOOT, 0.0);
+}
+
+fn buildNextDrop(newPosition: vec3<f32>, newVelocity: vec3<f32>, baseRadius: f32, nextPair: PairState, pair: PairState, anchorPosition: vec3<f32>) -> Drop {
+  var next: Drop;
+  next.positionAndRadius = vec4<f32>(newPosition, baseRadius);
+  next.velocityAndSpeed = vec4<f32>(newVelocity, length(newVelocity));
+
+  if (justRespawned(nextPair, pair)) {
+    next.positionAndRadius = vec4<f32>(computeRespawnPosition(anchorPosition), baseRadius);
+    next.velocityAndSpeed = vec4<f32>(0.0, 0.0, 0.0, 0.0);
+  }
+  return next;
+}
+
+// ───── PUBLIC INTERFACE ─────
+
 @compute @workgroup_size(1)
-fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
+fn computeSimulationStep(@builtin(global_invocation_id) globalId: vec3<u32>) {
   let h = uniforms.hTNowDtFluidDensity.x;
   let tNow = uniforms.hTNowDtFluidDensity.y;
   let dt = uniforms.hTNowDtFluidDensity.z;
@@ -126,38 +186,23 @@ fn computeMain(@builtin(global_invocation_id) globalId: vec3<u32>) {
   let pair = currentPairState[i];
   let anchorPosition = anchors[i].positionAndRadius.xyz;
 
-  // ───── DISPATCHER, WEIGHTS, BLENDING ─────
-  let weights = computePhaseWeights(pair, tNow, 1e-6);
-  let gravity = blendPhaseValue(weights, 0.0, GRAVITY, GRAVITY);
-  let drag = blendPhaseValue(weights, BASE_DRAG, BASE_DRAG, BASE_DRAG * FALLING_DRAG_FACTOR);
+  let blend = computePhaseBlend(pair, tNow);
 
-  // ───── FORCES ─────
   let myPosition = currentDrips[i].positionAndRadius.xyz;
   let myMass = computeParticleMass(currentDrips[i].positionAndRadius.w, fluidDensity);
   let anchorMass = computeParticleMass(anchors[i].positionAndRadius.w, fluidDensity);
-  let force = computeCohesionForce(myPosition, anchorPosition, myMass, anchorMass, GAMMA, h);
-
   let integrationMass = computeParticleMass(baseRadius, fluidDensity);
-  let acceleration = force / integrationMass + vec3<f32>(0.0, -gravity, 0.0);
+  let acceleration = computeNetAcceleration(myPosition, anchorPosition, myMass, anchorMass, integrationMass, blend.gravity, h);
 
   let oldVelocity = currentDrips[i].velocityAndSpeed.xyz;
   let oldPosition = currentDrips[i].positionAndRadius.xyz;
-  let newVelocity = oldVelocity * (1.0 - drag * dt) + acceleration * dt;
-  let newPosition = oldPosition + newVelocity * dt;
+  let newVelocity = integrateVelocity(oldVelocity, acceleration, blend.drag, dt);
+  let newPosition = integratePosition(oldPosition, newVelocity, dt);
 
   let separation = length(newPosition - anchorPosition);
   let nextPair = scheduleTick(pair, tNow, separation, newPosition.y, h, respawnY, i);
 
-  var next: Drop;
-  next.positionAndRadius = vec4<f32>(newPosition, baseRadius);
-  next.velocityAndSpeed = vec4<f32>(newVelocity, length(newVelocity));
-
-  if (getPhaseCode(nextPair) == PHASE_ATTACHED && getPhaseCode(pair) == PHASE_FALLING) {
-    next.positionAndRadius = vec4<f32>(anchorPosition + vec3<f32>(0.0, RESPAWN_OVERSHOOT, 0.0), baseRadius);
-    next.velocityAndSpeed = vec4<f32>(0.0, 0.0, 0.0, 0.0);
-  }
-
-  nextDrips[i] = next;
+  nextDrips[i] = buildNextDrop(newPosition, newVelocity, baseRadius, nextPair, pair, anchorPosition);
   nextPairState[i] = nextPair;
 }
 `;

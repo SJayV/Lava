@@ -1,6 +1,6 @@
 import { FULLSCREEN_TRIANGLE_POSITION_CHUNK } from '../src/gpuSetup.js';
 
-export const SHADER_SOURCE = /* wgsl */ `
+export const SHADER_SOURCE = `
 struct PostProcessUniforms {
   blurDirection: vec4<f32>,
   thresholdIntensityExposure: vec4<f32>,
@@ -18,59 +18,77 @@ struct VertexOutput {
 
 ${FULLSCREEN_TRIANGLE_POSITION_CHUNK}
 
+// ───── HELPER FUNCTIONS - VERTEX ─────
+
+fn computeUvFromClipPosition(position: vec2<f32>) -> vec2<f32> {
+  return vec2<f32>(position.x * 0.5 + 0.5, 0.5 - position.y * 0.5);
+}
+
+// ───── HELPER FUNCTIONS - BRIGHT-PASS EXTRACTION ─────
+
+fn extractBrightness(color: vec3<f32>, threshold: f32) -> vec3<f32> {
+  return max(color - vec3<f32>(threshold), vec3<f32>(0.0));
+}
+
+// ───── HELPER FUNCTIONS - COMPOSITE ─────
+
+fn isBackgroundPixel(alpha: f32) -> bool {
+  return alpha < 0.5;
+}
+
+fn combineBloom(color: vec3<f32>, bloom: vec3<f32>, intensity: f32, exposure: f32) -> vec3<f32> {
+  return (color + intensity * bloom) * exposure;
+}
+
+fn applyReinhardTonemap(color: vec3<f32>) -> vec3<f32> {
+  return color / (vec3<f32>(1.0) + color);
+}
+
+// ───── PUBLIC INTERFACE ─────
+
 @vertex
-fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
+fn vertexFullscreenTriangle(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
   var out: VertexOutput;
   let position = getFullscreenTrianglePosition(vertexIndex);
   out.position = vec4<f32>(position, 0.0, 1.0);
-  out.uv = vec2<f32>(position.x * 0.5 + 0.5, 0.5 - position.y * 0.5);
+  out.uv = computeUvFromClipPosition(position);
   return out;
 }
-
-// ───── BRIGHT-PASS EXTRACTION ─────
 
 @fragment
 fn fragmentExtract(in: VertexOutput) -> @location(0) vec4<f32> {
   let threshold = uniforms.thresholdIntensityExposure.x;
   let color = textureSample(sourceTexture, textureSampler, in.uv).rgb;
-  let bright = max(color - vec3<f32>(threshold), vec3<f32>(0.0));
+  let bright = extractBrightness(color, threshold);
   return vec4<f32>(bright, 1.0);
 }
 
-// ───── SEPARABLE GAUSSIAN BLUR ─────
-
 @fragment
 fn fragmentBlur(in: VertexOutput) -> @location(0) vec4<f32> {
+  const BLUR_WEIGHTS: array<f32, 9> = array<f32, 9>(0.0162, 0.0540, 0.1216, 0.1945, 0.2270, 0.1945, 0.1216, 0.0540, 0.0162);
   let texelSize = 1.0 / vec2<f32>(textureDimensions(sourceTexture));
   let step = uniforms.blurDirection.xy * texelSize;
   var sum = vec4<f32>(0.0);
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * -4.0) * 0.0162;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * -3.0) * 0.0540;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * -2.0) * 0.1216;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * -1.0) * 0.1945;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv) * 0.2270;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * 1.0) * 0.1945;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * 2.0) * 0.1216;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * 3.0) * 0.0540;
-  sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * 4.0) * 0.0162;
+  for (var k = 0; k < 9; k = k + 1) {
+    let offset = f32(k) - 4.0;
+    sum = sum + textureSample(sourceTexture, textureSampler, in.uv + step * offset) * BLUR_WEIGHTS[k];
+  }
   return sum;
 }
-
-// ───── COMPOSITE ─────
 
 @fragment
 fn fragmentComposite(in: VertexOutput) -> @location(0) vec4<f32> {
   let mainSample = textureSample(sourceTexture, textureSampler, in.uv);
   let bloom = textureSample(bloomTexture, textureSampler, in.uv).rgb;
 
-  if (mainSample.a < 0.5) {
+  if (isBackgroundPixel(mainSample.a)) {
     return vec4<f32>(mainSample.rgb, 1.0);
   }
 
   let intensity = uniforms.thresholdIntensityExposure.y;
   let exposure = uniforms.thresholdIntensityExposure.z;
-  let combined = (mainSample.rgb + intensity * bloom) * exposure;
-  let tonemapped = combined / (vec3<f32>(1.0) + combined);
+  let combined = combineBloom(mainSample.rgb, bloom, intensity, exposure);
+  let tonemapped = applyReinhardTonemap(combined);
   return vec4<f32>(tonemapped, 1.0);
 }
 `;

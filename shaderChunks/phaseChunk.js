@@ -10,8 +10,6 @@ export function getPhaseChunk() {
     const SIGMA_ATTACHED: f32 = 1.5;
     const SIGMA_GROWING: f32 = 1.5;
     const SIGMA_FALLING: f32 = 0.92;
-    const HOLD_MIN: f32 = 1.0;
-    const HOLD_MAX: f32 = 14.5;
 
     const PHASE_ATTACHED: f32 = 0.0;
     const PHASE_GROWING: f32 = 1.0;
@@ -53,6 +51,8 @@ export function getPhaseChunk() {
     }
 
     fn computeAttachedGrowingGap(pairIndex: u32, entryTime: f32) -> f32 {
+      const HOLD_MIN: f32 = 1.0;
+      const HOLD_MAX: f32 = 14.5;
       let t = hashLattice3D(i32(pairIndex), i32(entryTime * 1000.0), 0);
       return HOLD_MIN + t * (HOLD_MAX - HOLD_MIN);
     }

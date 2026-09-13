@@ -2,7 +2,7 @@ import { UNIFORM_BUFFER_SIZE } from './constants.js';
 
 // ───── SHARED WGSL CHUNKS ─────
 
-export const FULLSCREEN_TRIANGLE_POSITION_CHUNK = /* wgsl */ `
+export const FULLSCREEN_TRIANGLE_POSITION_CHUNK = `
   fn getFullscreenTrianglePosition(vertexIndex: u32) -> vec2<f32> {
     var positions = array<vec2<f32>, 3>(
       vec2<f32>(-1.0, -1.0),
@@ -104,7 +104,7 @@ export function initializePostProcessor(device, canvasFormat, shaderSource) {
   function _initializePipeline(fragmentEntryPoint, bindGroupLayout, targetFormat) {
     return device.createRenderPipeline({
       layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-      vertex: { module: shaderModule, entryPoint: 'vertexMain' },
+      vertex: { module: shaderModule, entryPoint: 'vertexFullscreenTriangle' },
       fragment: { module: shaderModule, entryPoint: fragmentEntryPoint, targets: [{ format: targetFormat }] },
       primitive: { topology: 'triangle-list' },
     });

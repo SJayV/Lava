@@ -59,8 +59,8 @@ function _initializeDropRaymarcher(device, presentationFormat) {
   const shaderModule = device.createShaderModule({ code: SHADER_SOURCE });
   const pipeline = device.createRenderPipeline({
     layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-    vertex: { module: shaderModule, entryPoint: 'vertexMain' },
-    fragment: { module: shaderModule, entryPoint: 'fragmentMain', targets: [{ format: presentationFormat }] },
+    vertex: { module: shaderModule, entryPoint: 'vertexRenderScene' },
+    fragment: { module: shaderModule, entryPoint: 'fragmentRenderScene', targets: [{ format: presentationFormat }] },
     primitive: { topology: 'triangle-list' },
   });
 

@@ -1,6 +1,6 @@
 import { getDensityKernelChunk, getParticleMassChunk } from '../shaderChunks/shapeChunk.js';
 
-export const SHADER_SOURCE = /* wgsl */ `
+export const SHADER_SOURCE = `
 struct CalibrationUniforms {
   hRatiosFluidDensity: vec4<f32>,
   localNeighborCount: vec4<f32>,
@@ -16,29 +16,42 @@ struct CalibrationResult {
 ${getDensityKernelChunk()}
 ${getParticleMassChunk()}
 
+// ───── HELPER FUNCTIONS - CALIBRATION ─────
+
 fn computeIsoLevelCalibrationFactor(radiusRatio: f32) -> f32 {
   return pow(1.0 - radiusRatio * radiusRatio, 3.0);
 }
 
+fn computeIsoLevel(dripMass: f32, dripRadiusRatio: f32, peakDensity: f32) -> f32 {
+  return computeIsoLevelCalibrationFactor(dripRadiusRatio) * dripMass * peakDensity;
+}
+
+fn computeAnchorMass(isoLevel: f32, anchorRadiusRatio: f32, peakDensity: f32) -> f32 {
+  return isoLevel / (computeIsoLevelCalibrationFactor(anchorRadiusRatio) * peakDensity);
+}
+
+fn computeGradientMagnitudeMax(localNeighborCount: f32, anchorMass: f32, h: f32) -> f32 {
+  const GRADIENT_COEFFICIENT: f32 = 2.7;
+  return localNeighborCount * anchorMass * (GRADIENT_COEFFICIENT / pow(h, 4.0));
+}
+
+// ───── PUBLIC INTERFACE ─────
+
 @compute @workgroup_size(1)
-fn computeMain() {
+fn computeCalibrationValues() {
   let h = uniforms.hRatiosFluidDensity.x;
   let dripRadiusRatio = uniforms.hRatiosFluidDensity.y;
   let anchorRadiusRatio = uniforms.hRatiosFluidDensity.z;
   let fluidDensity = uniforms.hRatiosFluidDensity.w;
   let nLocal = uniforms.localNeighborCount.x;
-
   let peakDensity = computeDensityKernel(0.0, h);
 
   let dripRadius = dripRadiusRatio * h;
   let dripMass = computeParticleMass(dripRadius, fluidDensity);
-  let isoLevel = computeIsoLevelCalibrationFactor(dripRadiusRatio) * dripMass * peakDensity;
-
-  let anchorMass = isoLevel / (computeIsoLevelCalibrationFactor(anchorRadiusRatio) * peakDensity);
+  let isoLevel = computeIsoLevel(dripMass, dripRadiusRatio, peakDensity);
+  let anchorMass = computeAnchorMass(isoLevel, anchorRadiusRatio, peakDensity);
   let anchorRadius = computeParticleRadius(anchorMass, fluidDensity);
-
-  const GRADIENT_COEFFICIENT: f32 = 2.7;
-  let gradientMagnitudeMax = nLocal * anchorMass * (GRADIENT_COEFFICIENT / pow(h, 4.0));
+  let gradientMagnitudeMax = computeGradientMagnitudeMax(nLocal, anchorMass, h);
 
   result.values = vec4<f32>(dripRadius, anchorRadius, isoLevel, gradientMagnitudeMax);
 }

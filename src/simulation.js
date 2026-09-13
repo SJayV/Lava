@@ -27,7 +27,7 @@ export async function computeCalibration(device, { smoothingRadius, dripRadiusRa
   const shaderModule = device.createShaderModule({ code: CALIBRATION_SHADER_SOURCE });
   const pipeline = device.createComputePipeline({
     layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-    compute: { module: shaderModule, entryPoint: 'computeMain' },
+    compute: { module: shaderModule, entryPoint: 'computeCalibrationValues' },
   });
   const bindGroup = device.createBindGroup({
     layout: bindGroupLayout,
@@ -80,7 +80,7 @@ function _initializeDripComputePass(device) {
   const shaderModule = device.createShaderModule({ code: SHADER_SOURCE });
   const pipeline = device.createComputePipeline({
     layout: device.createPipelineLayout({ bindGroupLayouts: [bindGroupLayout] }),
-    compute: { module: shaderModule, entryPoint: 'computeMain' },
+    compute: { module: shaderModule, entryPoint: 'computeSimulationStep' },
   });
 
   return { device, uniformBuffer, bindGroupLayout, pipeline };

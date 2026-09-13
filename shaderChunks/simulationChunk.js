@@ -5,10 +5,7 @@ export function getSimulationChunk() {
     fn computeCohesionKernel(distance: f32, smoothingRadius: f32) -> f32 {
       let h6 = pow(smoothingRadius, 6.0);
       let nearTerm = pow(smoothingRadius - distance, 3.0) * pow(distance, 3.0);
-      var value = nearTerm;
-      if (distance <= 0.5 * smoothingRadius) {
-        value = 2.0 * nearTerm - h6 / 64.0;
-      }
+      let value = select(nearTerm, 2.0 * nearTerm - h6 / 64.0, distance <= 0.5 * smoothingRadius);
       return (${COHESION_NORMALIZATION} / pow(smoothingRadius, 9.0)) * value;
     }
 
