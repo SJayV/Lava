@@ -140,9 +140,9 @@ export function swapPairState(pairState) {
 
 // ───── PUBLIC INTERFACE ─────
 
-export function initializeSceneState(device, registry, { pairCount, lineSpanWidth, lineY, anchorRadius, dripRadius }) {
-  const anchorBuffer = _initializeAnchorBuffer(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: anchorRadius });
-  const dropState = _initializeDropState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius: dripRadius });
+export function initializeSceneState(device, registry, { pairCount, lineSpanWidth, lineY, radius }) {
+  const anchorBuffer = _initializeAnchorBuffer(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius });
+  const dropState = _initializeDropState(device, registry, { ballCount: pairCount, lineSpanWidth, lineY, radius });
   const pairState = _initializePairStateBuffers(device, registry, pairCount);
   return { anchorBuffer, dropState, pairState };
 }

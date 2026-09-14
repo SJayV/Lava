@@ -7,8 +7,7 @@ import { writeUniformBuffer, initializeGpuPass, initializeBufferBindGroup, initi
 // ───── SIZING CONSTANTS ─────
 
 export const N_LOCAL = 4;
-export const ANCHOR_RADIUS_TO_H_RATIO = 0.3;
-export const DRIP_RADIUS_TO_H_RATIO = 0.3;
+export const RADIUS_TO_H_RATIO = 0.3;
 
 // ───── CALIBRATION PASS ─────
 
@@ -28,10 +27,9 @@ function _initializeCalibrationPass(device) {
   });
 }
 
-function _writeCalibrationUniforms(calibrationPass, { smoothingRadius, dripRadiusRatio, anchorRadiusRatio, fluidDensity, localNeighborCount }) {
+function _writeCalibrationUniforms(calibrationPass, { smoothingRadius, radiusRatio, fluidDensity, localNeighborCount }) {
   const data = new Float32Array(UNIFORM_BUFFER_SIZE / 4);
-  data.set([smoothingRadius, dripRadiusRatio, anchorRadiusRatio, fluidDensity], 0);
-  data.set([localNeighborCount, 0, 0, 0], 4);
+  data.set([smoothingRadius, radiusRatio, fluidDensity, localNeighborCount], 0);
   writeUniformBuffer(calibrationPass, data);
 }
 
@@ -44,18 +42,18 @@ function _runCalibrationPass(calibrationPass, bindGroup, resultBuffer, stagingBu
 
 async function _readCalibrationResult(stagingBuffer) {
   await stagingBuffer.mapAsync(GPUMapMode.READ);
-  const [dripRadius, anchorRadius, isoLevel, gradientMagnitudeMax] = new Float32Array(stagingBuffer.getMappedRange().slice(0));
+  const [radius, isoLevel, gradientMagnitudeMax] = new Float32Array(stagingBuffer.getMappedRange().slice(0));
   stagingBuffer.unmap();
-  return { dripRadius, anchorRadius, isoLevel, gradientMagnitudeMax };
+  return { radius, isoLevel, gradientMagnitudeMax };
 }
 
-export async function computeCalibration(device, { smoothingRadius, dripRadiusRatio, anchorRadiusRatio, fluidDensity, localNeighborCount }) {
+export async function computeCalibration(device, { smoothingRadius, radiusRatio, fluidDensity, localNeighborCount }) {
   const calibrationPass = _initializeCalibrationPass(device);
   const resultBuffer = device.createBuffer({ size: CALIBRATION_RESULT_SIZE, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
   const stagingBuffer = device.createBuffer({ size: CALIBRATION_RESULT_SIZE, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
   const bindGroup = initializeBufferBindGroup(calibrationPass, [resultBuffer]);
 
-  _writeCalibrationUniforms(calibrationPass, { smoothingRadius, dripRadiusRatio, anchorRadiusRatio, fluidDensity, localNeighborCount });
+  _writeCalibrationUniforms(calibrationPass, { smoothingRadius, radiusRatio, fluidDensity, localNeighborCount });
   _runCalibrationPass(calibrationPass, bindGroup, resultBuffer, stagingBuffer);
 
   return _readCalibrationResult(stagingBuffer);

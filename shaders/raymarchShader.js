@@ -32,8 +32,22 @@ ${getColorChunk()}
 
 // ───── HELPER FUNCTIONS - DENSITY FIELD ─────
 
+fn computeAnisotropicDistance(position: vec3<f32>, dropPosition: vec3<f32>, velocity: vec3<f32>, speed: f32) -> f32 {
+  const STRETCH_FACTOR: f32 = 0.15;
+  let offset = position - dropPosition;
+  if (speed < 1e-6) {
+    return length(offset);
+  }
+  let axis = velocity / speed;
+  let along = dot(offset, axis);
+  let perp = offset - along * axis;
+  let stretch = 1.0 + STRETCH_FACTOR * speed;
+  let scaledAlong = along / stretch;
+  return sqrt(scaledAlong * scaledAlong + dot(perp, perp));
+}
+
 fn densityContribution(drop: Drop, position: vec3<f32>, h: f32, fluidDensity: f32) -> f32 {
-  let distance = length(position - drop.positionAndRadius.xyz);
+  let distance = computeAnisotropicDistance(position, drop.positionAndRadius.xyz, drop.velocityAndSpeed.xyz, drop.velocityAndSpeed.w);
   let mass = computeParticleMass(drop.positionAndRadius.w, fluidDensity);
   return mass * computeDensityKernel(distance, h);
 }

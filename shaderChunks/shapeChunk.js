@@ -18,9 +18,5 @@ export function getParticleMassChunk() {
     fn computeParticleMass(radius: f32, fluidDensity: f32) -> f32 {
       return ${MASS_VOLUME_COEFFICIENT} * radius * radius * radius * fluidDensity;
     }
-
-    fn computeParticleRadius(mass: f32, fluidDensity: f32) -> f32 {
-      return pow(mass / (${MASS_VOLUME_COEFFICIENT} * fluidDensity), 1.0 / 3.0);
-    }
   `;
 }

@@ -44,7 +44,7 @@ $$A(\mathbf x,t) = \sum_j m_j\,W_{\text{density}}(\mathbf x-\mathbf x_j(t),h)$$
 
 $$\text{surface} = \{\mathbf x : A(\mathbf x) = \text{isoLevel}\}$$
 
-- **calibration:** `isoLevel` set against one particle's own peak density, pairs on a line never a densely packed fluid
+- **calibration:** `isoLevel` set against one particle's own size, pairs on a line never a densely packed fluid
   - a lone drop already past `isoLevel` alone; an overlapping pair, one fused body
 
 **Pseudo-random noise function** $\mathcal N(\mathbf x,t)$:
@@ -56,6 +56,7 @@ $$\hat A(\mathbf x,t) = A(\mathbf x,t) + \beta\cdot\mathcal N(\mathbf x,t)$$
 
 **Stretch anisotropy:** fast-moving drips, visually elongated along their own velocity
 - a rendering-only effect, the physics itself always isotropic
+- per-drop distance metric, compressed along the velocity axis by speed
 
 ### 1.4 Weighting of the phases
 
@@ -103,21 +104,22 @@ $$\mathbf v \leftarrow \mathbf v\,(1-\mu\,dt) + \mathbf a\,dt, \qquad \mathbf x 
 
 ### 1.6 Noise & shading
 
-**One shared 3D value-noise fbm field**, sampled in true world space, seamless through a merge:
+**Surface perturbation:** single-octave 3D gradient noise, scrolled through world space over time
+
+**Shading noise:** a separate 3D value-noise fbm, sampled independently again at the hit point
 
 $$\mathcal{N}(\mathbf{x},t) = \frac{\sum_{k=0}^{K-1} a^k\, n\big(2^k(\mathbf{x} + t\,\hat{\mathbf{z}})\big)}{\sum_{k=0}^{K-1} a^k}$$
 
-**Temperature ramp:** cooled, molten, white-hot
-- white-hot deliberately past full brightness, feeding the bloom pass
+**Temperature ramp:** yellow, orange, red, driven by the shading noise
 
-$$C_{\text{temp}}(u) = \text{mix}\!\Big(\text{mix}(C_{\text{cool}}, C_{\text{molten}}, \text{smoothstep}(0,0.6,u)),\ C_{\text{hot}},\ \text{smoothstep}(0.6,1,u)\Big)$$
+$$C_{\text{temp}}(u) = \text{mix}\!\Big(\text{mix}(C_{\text{yellow}}, C_{\text{orange}}, \text{smoothstep}(0.32,0.5,u)),\ C_{\text{red}},\ \text{smoothstep}(0.5,0.68,u)\Big)$$
 
-**Shading:** single directional light plus a Fresnel rim term
-- ramp clamped for the lit term
-- overshoot kept as a separate emissive term, feeding bloom independently
+**Shading:** rim darkening from the view/normal angle alone
+- full color facing the viewer, black at grazing angles
 
-$$F(\mathbf v,\mathbf n) = \big(1-\text{clamp}(\langle \mathbf v,\mathbf n\rangle,0,1)\big)^4
-\\ C_{\text{shaded}} = \min(C_{\text{temp}},1)\cdot\text{clamp}\big(\text{ambient} + \langle \mathbf n,\mathbf l\rangle + F,\ 0,\ 1\big) + \max(C_{\text{temp}}-1,\ 0)$$
+$$C_{\text{shaded}} = C_{\text{temp}}\cdot\text{mix}\big(1,\ 0,\ (1-\text{clamp}(\langle \mathbf n,\mathbf v\rangle,0,1))^{1.2}\big)$$
+
+**Bloom:** bright-pass threshold applied to the final shaded color
 
 ### 1.7 Camera
 
@@ -137,7 +139,7 @@ $$W_L = 2\cdot d_{\text{eye}}\cdot\tan(\text{fovVertical}/2)\cdot\alpha$$
 ```mermaid
 flowchart TD
     A["1. Calibration: compute, once at startup
-    derives iso-level, anchor radius, gradient bound"] --> B["2. Simulation: compute, per substep
+    derives iso-level, drop radius, gradient bound"] --> B["2. Simulation: compute, per substep
     ping-ponged drop + pair-state buffers"]
     B --> C["3. Raymarch: render
     isosurface trace + shading, into an offscreen texture"]
